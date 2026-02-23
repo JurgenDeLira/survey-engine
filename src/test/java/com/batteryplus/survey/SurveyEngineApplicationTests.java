@@ -1,4 +1,4 @@
-package com.jorge.survey;
+package com.batteryplus.survey;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

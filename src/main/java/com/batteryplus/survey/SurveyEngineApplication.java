@@ -1,4 +1,4 @@
-package com.jorge.survey;
+package com.batteryplus.survey;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
