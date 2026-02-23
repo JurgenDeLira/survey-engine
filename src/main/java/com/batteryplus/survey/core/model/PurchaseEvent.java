@@ -6,4 +6,4 @@ import java.time.LocalDateTime;
 public record PurchaseEvent(
         LocalDateTime fechaGarantia,
         Integer noGarantia
-) {}
+) { }
