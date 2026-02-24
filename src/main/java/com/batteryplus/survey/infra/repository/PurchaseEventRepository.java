@@ -1,37 +1,73 @@
 package com.batteryplus.survey.infra.repository;
 
-import com.batteryplus.survey.core.model.Customer;
-import com.batteryplus.survey.core.model.PurchaseEvent;
+//inserta/consulta eventos
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-//inserta/consulta eventos
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+
 @Repository
 public class PurchaseEventRepository {
 
     private final JdbcTemplate stagingJdbc;
 
-    public PurchaseEventRepository(JdbcTemplate stagingJdbcTemplate) {
-        this.stagingJdbc = stagingJdbcTemplate;
+    public PurchaseEventRepository(@Qualifier("stagingJdbcTemplate") JdbcTemplate stagingJdbc) {
+        this.stagingJdbc = stagingJdbc;
     }
 
-    public void insertIfNotExists(PurchaseEvent event, String customerKey, String payLoadJson) {
-        Customer c = event.customer();
-
-        //Insert idempotente: si ya tengo purchase_id, no lo duplico
-        stagingJdbc.update("""
-                IF NOT EXISTS (SELECT 1 FROM dbo.purchase_events WHERE purchase_id = ?)
-                BEGIN
-                    INSERT INTO dbo.purchase_events (
-                    purchase_id, source, ticket_id, branch_id, branch_name, purchase_datetime, 
-                    customer_key, customer_name, customer_phone, customer_email, payload_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    END
+    /**
+     * Inserta una venta en staging solo si no existe.
+     * @return true si insertó (venta nueva), false si ya existía (ya procesada)
+     */
+    public boolean insertIfNotExists(
+            String purchaseId,
+            String source,
+            LocalDateTime fecha,
+            int idSucursal,
+            long ticket,
+            String telefono,
+            String nombre,
+            String email,
+            String familia,
+            String marca,
+            String producto,
+            Integer cantidad,
+            String payloadJson
+    ) {
+        try {
+            stagingJdbc.update("""
+                INSERT INTO dbo.purchase_events (
+                    purchase_id, source, fecha, id_sucursal, ticket,
+                    telefono, nombre, email,
+                    familia, marca, producto, cantidad,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?,
+                         ?, ?, ?,
+                         ?, ?, ?, ?,
+                         ?)
                 """,
-                event.purchaseId(),
-                event.purchaseid(), event.source(), event.ticketId(), event.branchId(),
-                event.branchName(), event.purchaseDateTime().toInstant(), customerKey, c != null c.name() : null,
-                c != null ? c.phone() : null, c != null ? c.email() : null, payLoadJson
-        );
+                    purchaseId,
+                    source,
+                    Timestamp.valueOf(fecha),
+                    idSucursal,
+                    ticket,
+                    telefono,
+                    nombre,
+                    email,
+                    familia,
+                    marca,
+                    producto,
+                    cantidad,
+                    payloadJson
+            );
+            return true;
+        } catch (DuplicateKeyException ex) {
+            // Ya existía purchase_id (o el unique constraint source+id_sucursal+ticket)
+            return false;
+        }
     }
 }

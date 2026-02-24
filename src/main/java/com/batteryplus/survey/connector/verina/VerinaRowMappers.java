@@ -1,33 +1,27 @@
 package com.batteryplus.survey.connector.verina;
 
-import com.batteryplus.survey.core.model.Customer;
-import com.batteryplus.survey.core.model.PurchaseEvent;
-import com.batteryplus.survey.core.model.PurchaseItem;
+//RowMappers
 import org.springframework.jdbc.core.RowMapper;
+import java.sql.Timestamp;
 
-//RowMapper(s)
 public class VerinaRowMappers {
+    private VerinaRowMappers() {}
 
-    public static final RowMapper<Customer> CUSTOMER = (rs, rowNum) -> new Customer(
-            rs.getString("Nombre_Automovilista"),
-            rs.getString("Telefono"),
-            rs.getString("Email"),
-            rs.getString("Marca_Carro"),
-            rs.getString("Tipo"),
-            rs.getString("Modelo")
+    public static final RowMapper<SaleRow> SALE_ROW = (rs, rowNum) -> {
+        Timestamp ts = rs.getTimestamp("Fecha");
 
-    );
-
-    public static final RowMapper<PurchaseEvent> PURCHASE_EVENT = (rs, rowNum) -> new PurchaseEvent(
-            rs.getTimestamp("Fecha_Garantia") != null
-                    ? rs.getTimestamp("Fecha_Garantia").toLocalDateTime()
-                    : null,
-            rs.getObject("NoGarantia", Integer.class)
-    );
-
-    public static final RowMapper<PurchaseItem> PURCHASE_ITEM = (rs, rowNum) -> new PurchaseItem(
-            rs.getString("Marca"),
-            rs.getString("Producto")
-    );
-
+        return new SaleRow(
+                rs.getInt("IDSucursal"),
+                rs.getString("Sucursal"),
+                rs.getLong("Ticket"),
+                ts != null ? ts.toLocalDateTime() : null,
+                rs.getString("Nombre_Automovilista"),
+                rs.getString("Telefono"),
+                rs.getString("Email"),
+                rs.getString("Familia"),
+                rs.getString("Marca"),
+                rs.getString("Producto"),
+                (Integer) rs.getObject("Cantidad") // null-safe
+        );
+    };
 }
