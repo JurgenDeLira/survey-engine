@@ -1,6 +1,7 @@
 package com.batteryplus.survey.infra.repository;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -8,6 +9,7 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+@ConditionalOnProperty(prefix="app.datasource.staging", name="enabled", havingValue="true")
 @Repository
 public class CheckpointRepository {
 

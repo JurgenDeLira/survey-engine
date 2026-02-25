@@ -9,10 +9,13 @@ import com.batteryplus.survey.infra.repository.PurchaseEventRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
+//LA SIGUIENTE LINEA ES PARA HACER PRUEBA SIN STAGING
+@ConditionalOnProperty(name="app.jobs.verinaPull.enabled", havingValue="true")
 @Component
 public class VerinaPullJob {
 

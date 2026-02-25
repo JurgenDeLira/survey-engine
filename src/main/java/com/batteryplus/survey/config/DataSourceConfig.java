@@ -2,7 +2,9 @@ package com.batteryplus.survey.config;
 
 //2 DataSources + 2 JdbcTemplate
 
+import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
@@ -14,24 +16,38 @@ import javax.sql.DataSource;
 @Configuration
 public class DataSourceConfig {
 
+    // =========================
+    // VERINA
+    // =========================
     @Bean(name = "verinaDataSource")
+    @ConditionalOnProperty(prefix = "app.datasource.verina", name = "enabled", havingValue = "true")
     @ConfigurationProperties(prefix = "app.datasource.verina")
     public DataSource verinaDataSource() {
-        return DataSourceBuilder.create().build();
-    }
-
-    @Bean(name = "stagingDataSource")
-    @ConfigurationProperties(prefix = "app.datasource.staging")
-    public DataSource stagingDataSource() {
-        return DataSourceBuilder.create().build();
+        return DataSourceBuilder.create()
+                .type(HikariDataSource.class)
+                .build();
     }
 
     @Bean(name = "verinaJdbcTemplate")
+    @ConditionalOnProperty(prefix = "app.datasource.verina", name = "enabled", havingValue = "true")
     public JdbcTemplate verinaJdbcTemplate(@Qualifier("verinaDataSource") DataSource ds) {
         return new JdbcTemplate(ds);
     }
 
+    // =========================
+    // STAGING
+    // =========================
+    @Bean(name = "stagingDataSource")
+    @ConditionalOnProperty(prefix = "app.datasource.staging", name = "enabled", havingValue = "true")
+    @ConfigurationProperties(prefix = "app.datasource.staging")
+    public DataSource stagingDataSource() {
+        return DataSourceBuilder.create()
+                .type(HikariDataSource.class)
+                .build();
+    }
+
     @Bean(name = "stagingJdbcTemplate")
+    @ConditionalOnProperty(prefix = "app.datasource.staging", name = "enabled", havingValue = "true")
     public JdbcTemplate stagingJdbcTemplate(@Qualifier("stagingDataSource") DataSource ds) {
         return new JdbcTemplate(ds);
     }
