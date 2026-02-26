@@ -26,11 +26,7 @@ public class VerinaQueries {
             WHERE [vTickets/Cancelaciones].Numero IS NULL
               AND [vTickets/Garantias].Numero IS NULL
               AND Ventas.IDTicket IS NOT NULL
-
-              -- incremental por fecha (checkpoint)
               AND vTickets.Fecha > ?
-
-              -- filtro negocio (MVP)
               AND vTickets.Familia = 'ACUMULADOR'
               AND vTickets.IDSucursal NOT IN (1,2,3,4,5,12)
         ),
@@ -42,28 +38,18 @@ public class VerinaQueries {
                    ) AS rn
             FROM [Garantias/Expedicion]
         )
-        SELECT
+        SELECT TOP (?)
             t.IDSucursal,
             t.Sucursal,
             t.Numero AS Ticket,
             t.Fecha,
             t.Familia,
             t.Marca,
-            t.IDProducto,
-            t.BCI,
             t.Producto,
             t.Cantidad,
-
             CONCAT_WS(' ', g.Automovilista, g.Automovilista_PA, g.Automovilista_SA) AS Nombre_Automovilista,
             g.Telefono,
-            g.Email,
-            g.Marca AS Marca_Carro,
-            g.Tipo,
-            g.Modelo,
-
-            CONVERT(DATE, g.FechaFin) AS Fecha_Garantia,
-            g.NoGarantia
-
+            g.Email
         FROM Tickets_numerados t
         LEFT JOIN Garantias_numeradas g
             ON t.Numero = g.IDTicket
