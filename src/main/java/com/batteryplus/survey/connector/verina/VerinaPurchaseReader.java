@@ -4,6 +4,7 @@ package com.batteryplus.survey.connector.verina;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.sql.Timestamp;
@@ -13,6 +14,7 @@ import java.util.List;
 import static com.batteryplus.survey.connector.verina.VerinaQueries.FETCH_AFTER_DATE;
 import static com.batteryplus.survey.connector.verina.VerinaRowMappers.SALE_ROW;
 
+@ConditionalOnProperty(name = "app.datasource.verina.enabled", havingValue = "true")
 @Component
 public class VerinaPurchaseReader {
 

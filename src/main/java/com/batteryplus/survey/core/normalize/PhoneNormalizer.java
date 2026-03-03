@@ -7,23 +7,31 @@ import org.springframework.stereotype.Component;
 public class PhoneNormalizer {
 
     public String toE164OrNull(String raw) {
-
         if (raw == null) return null;
 
-        String digits = raw.replaceAll("[^0-9]", "");
-        if (digits.isBlank()) return null;
+        String digits = raw.replaceAll("\\D", ""); // solo números
 
-        // Si ya empieza con 52 (ej 521668...)
-        if (digits.startsWith("52")) {
+        // 10 dígitos MX (local)
+        if (digits.length() == 10) {
+            return "+521" + digits;
+        }
+
+        // 11 dígitos si viene con "1" ya pegado (ej: 1668...)
+        if (digits.length() == 11 && digits.startsWith("1")) {
+            return "+52" + digits; // quedaría +521...
+        }
+
+        // 12 dígitos si viene como 52 + 10
+        if (digits.length() == 12 && digits.startsWith("52")) {
+            // muchos sistemas lo guardan como +521...
+            return "+521" + digits.substring(2);
+        }
+
+        // ya viene con country?
+        if (digits.length() >= 11 && raw.trim().startsWith("+")) {
             return "+" + digits;
         }
 
-        // Si son 10 dígitos (ej 6681234567)
-        if (digits.length() == 10) {
-            return "+52" + digits;
-        }
-
-        // Fallback
-        return "+" + digits;
+        return null;
     }
 }

@@ -9,6 +9,8 @@ import com.batteryplus.survey.core.normalize.PhoneNormalizer;
 import com.batteryplus.survey.infra.repository.CheckpointRepository;
 import com.batteryplus.survey.infra.repository.PurchaseEventRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -16,9 +18,11 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.List;
 
-@ConditionalOnProperty(name="app.jobs.verinaPull.enabled", havingValue="true")
+@ConditionalOnProperty(name = "app.jobs.verinaPull.enabled", havingValue = "true")
 @Component
 public class VerinaPullJob {
+
+    private static final Logger log = LoggerFactory.getLogger(VerinaPullJob.class);
 
     private static final String SOURCE = "VERINA";
 
@@ -77,13 +81,26 @@ public class VerinaPullJob {
             );
 
             if (inserted) {
-                // Normaliza a E164 (+521...)
                 String phoneE164 = phoneNormalizer.toE164OrNull(row.telefono());
-                if (phoneE164 != null) {
-                    clientifyService.upsertUltimaCompraTicketAndTagByPhone(
-                            phoneE164,
-                            String.valueOf(row.ticket())
-                    );
+
+                if (phoneE164 == null) {
+                    log.warn("Venta insertada pero sin teléfono válido. purchaseId={} tel={}", purchaseId, row.telefono());
+                } else {
+                    // Recomiendo guardar ticket con sucursal para evitar colisiones
+                    String ticketValue = "VERINA-" + row.idSucursal() + "-" + row.ticket();
+
+                    try {
+                        boolean ok = clientifyService.upsertUltimaCompraTicketAndTagByPhone(
+                                phoneE164,
+                                ticketValue
+                        );
+                        if (!ok) {
+                            log.warn("No se encontró contacto exacto en Clientify para phone={}. purchaseId={}", phoneE164, purchaseId);
+                        }
+                    } catch (Exception ex) {
+                        // No dejes que una falla de Clientify te mate el job completo
+                        log.error("Error actualizando Clientify. purchaseId={} phone={}", purchaseId, phoneE164, ex);
+                    }
                 }
             }
 

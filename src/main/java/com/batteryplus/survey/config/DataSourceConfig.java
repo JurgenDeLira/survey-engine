@@ -17,7 +17,7 @@ import javax.sql.DataSource;
 public class DataSourceConfig {
 
     @Bean(name = "verinaDataSource")
-    @ConditionalOnProperty(prefix = "app.datasource.verina", name = "url")
+    @ConditionalOnProperty(name = "app.datasource.verina.enabled", havingValue = "true")
     @ConfigurationProperties(prefix = "app.datasource.verina")
     public DataSource verinaDataSource() {
         return DataSourceBuilder.create()
@@ -26,13 +26,13 @@ public class DataSourceConfig {
     }
 
     @Bean(name = "verinaJdbcTemplate")
-    @ConditionalOnProperty(prefix = "app.datasource.verina", name = "url")
+    @ConditionalOnProperty(name = "app.datasource.verina.enabled", havingValue = "true")
     public JdbcTemplate verinaJdbcTemplate(@Qualifier("verinaDataSource") DataSource ds) {
         return new JdbcTemplate(ds);
     }
 
     @Bean(name = "stagingDataSource")
-    @ConditionalOnProperty(prefix = "app.datasource.staging", name = "url")
+    @ConditionalOnProperty(name = "app.datasource.staging.enabled", havingValue = "true")
     @ConfigurationProperties(prefix = "app.datasource.staging")
     public DataSource stagingDataSource() {
         return DataSourceBuilder.create()
@@ -41,7 +41,7 @@ public class DataSourceConfig {
     }
 
     @Bean(name = "stagingJdbcTemplate")
-    @ConditionalOnProperty(prefix = "app.datasource.staging", name = "url")
+    @ConditionalOnProperty(name = "app.datasource.staging.enabled", havingValue = "true")
     public JdbcTemplate stagingJdbcTemplate(@Qualifier("stagingDataSource") DataSource ds) {
         return new JdbcTemplate(ds);
     }
