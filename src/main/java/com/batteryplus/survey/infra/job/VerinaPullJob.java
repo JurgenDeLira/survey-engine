@@ -3,8 +3,8 @@ package com.batteryplus.survey.infra.job;
 //@Scheduled: pull incremental
 
 import com.batteryplus.survey.adapter.clientify.ClientifyService;
-import com.batteryplus.survey.connector.verina.SaleRow;
 import com.batteryplus.survey.connector.verina.VerinaPurchaseReader;
+import com.batteryplus.survey.core.model.VerinaTicketRow;
 import com.batteryplus.survey.core.normalize.PhoneNormalizer;
 import com.batteryplus.survey.infra.repository.CheckpointRepository;
 import com.batteryplus.survey.infra.repository.PurchaseEventRepository;
@@ -23,8 +23,8 @@ import java.util.List;
 public class VerinaPullJob {
 
     private static final Logger log = LoggerFactory.getLogger(VerinaPullJob.class);
-
-    private static final String SOURCE = "VERINA";
+    private static final String SOURCE = "VERINA_ACUMULADOR";
+    private static final int FETCH_LIMIT = 200;
 
     private final CheckpointRepository checkpointRepository;
     private final PurchaseEventRepository purchaseEventRepository;
@@ -54,12 +54,14 @@ public class VerinaPullJob {
                 .getLastDateTime(SOURCE)
                 .orElse(LocalDateTime.now().minusMinutes(15));
 
-        List<SaleRow> rows = verinaPurchaseReader.fetchAfter(lastDateTime);
+        List<VerinaTicketRow> rows = verinaPurchaseReader.fetchAfter(lastDateTime, FETCH_LIMIT);
 
         LocalDateTime maxFecha = lastDateTime;
 
-        for (SaleRow row : rows) {
-            if (row.fecha() == null) continue;
+        for (VerinaTicketRow row : rows) {
+            if (row.fecha() == null) {
+                continue;
+            }
 
             String purchaseId = "VERINA-" + row.idSucursal() + "-" + row.ticket();
             String payloadJson = objectMapper.writeValueAsString(row);
@@ -73,10 +75,10 @@ public class VerinaPullJob {
                     row.telefono(),
                     row.nombreAutomovilista(),
                     row.email(),
-                    row.familia(),
-                    row.marca(),
-                    row.producto(),
-                    row.cantidad(),
+                    null,   // familia
+                    null,   // marca
+                    null,   // producto
+                    null,   // cantidad
                     payloadJson
             );
 
@@ -86,7 +88,6 @@ public class VerinaPullJob {
                 if (phoneE164 == null) {
                     log.warn("Venta insertada pero sin teléfono válido. purchaseId={} tel={}", purchaseId, row.telefono());
                 } else {
-                    // Recomiendo guardar ticket con sucursal para evitar colisiones
                     String ticketValue = "VERINA-" + row.idSucursal() + "-" + row.ticket();
 
                     try {
@@ -98,13 +99,14 @@ public class VerinaPullJob {
                             log.warn("No se encontró contacto exacto en Clientify para phone={}. purchaseId={}", phoneE164, purchaseId);
                         }
                     } catch (Exception ex) {
-                        // No dejes que una falla de Clientify te mate el job completo
                         log.error("Error actualizando Clientify. purchaseId={} phone={}", purchaseId, phoneE164, ex);
                     }
                 }
             }
 
-            if (row.fecha().isAfter(maxFecha)) maxFecha = row.fecha();
+            if (row.fecha().isAfter(maxFecha)) {
+                maxFecha = row.fecha();
+            }
         }
 
         if (maxFecha.isAfter(lastDateTime)) {

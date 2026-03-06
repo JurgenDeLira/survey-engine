@@ -43,10 +43,6 @@ public class VerinaQueries {
             t.Sucursal,
             t.Numero AS Ticket,
             t.Fecha,
-            t.Familia,
-            t.Marca,
-            t.Producto,
-            t.Cantidad,
             CONCAT_WS(' ', g.Automovilista, g.Automovilista_PA, g.Automovilista_SA) AS Nombre_Automovilista,
             g.Telefono,
             g.Email
@@ -55,6 +51,6 @@ public class VerinaQueries {
             ON t.Numero = g.IDTicket
            AND t.IDSucursal = g.IDSucursal
            AND t.rn = g.rn
-        ORDER BY t.Fecha ASC;
+        ORDER BY t.Fecha ASC, t.IDSucursal ASC, t.Numero ASC;
         """;
 }
