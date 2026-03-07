@@ -1,49 +1,118 @@
 package com.batteryplus.survey.infra.service;
 
-import com.batteryplus.survey.core.model.VerinaSaleRow;
+import com.batteryplus.survey.adapter.clientify.ClientifyService;
+import com.batteryplus.survey.connector.verina.VerinaPurchaseReader;
+import com.batteryplus.survey.core.model.VerinaTicketRow;
+import com.batteryplus.survey.core.normalize.PhoneNormalizer;
 import com.batteryplus.survey.infra.repository.CheckpointRepository;
-import com.batteryplus.survey.infra.verina.VerinaSalesRepository;
+import com.batteryplus.survey.infra.repository.PurchaseEventRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 
-@ConditionalOnProperty(prefix="app.datasource.verina", name="enabled", havingValue="true")
 @Service
+@ConditionalOnProperty(name = "app.datasource.verina.enabled", havingValue = "true")
 public class VerinaPullService {
 
-    private static final String SOURCE = "verina.tickets.acumulador";
+    private static final Logger log = LoggerFactory.getLogger(VerinaPullService.class);
+    private static final String SOURCE = "VERINA_ACUMULADOR";
+    private static final int FETCH_LIMIT = 200;
 
     private final CheckpointRepository checkpointRepository;
-    private final VerinaSalesRepository verinaSalesRepository;
+    private final PurchaseEventRepository purchaseEventRepository;
+    private final VerinaPurchaseReader verinaPurchaseReader;
+    private final ClientifyService clientifyService;
+    private final PhoneNormalizer phoneNormalizer;
+    private final ObjectMapper objectMapper;
 
-    public VerinaPullService(CheckpointRepository checkpointRepository,
-                             VerinaSalesRepository verinaSalesRepository) {
+    public VerinaPullService(
+            CheckpointRepository checkpointRepository,
+            PurchaseEventRepository purchaseEventRepository,
+            VerinaPurchaseReader verinaPurchaseReader,
+            ClientifyService clientifyService,
+            PhoneNormalizer phoneNormalizer,
+            ObjectMapper objectMapper
+    ) {
         this.checkpointRepository = checkpointRepository;
-        this.verinaSalesRepository = verinaSalesRepository;
+        this.purchaseEventRepository = purchaseEventRepository;
+        this.verinaPurchaseReader = verinaPurchaseReader;
+        this.clientifyService = clientifyService;
+        this.phoneNormalizer = phoneNormalizer;
+        this.objectMapper = objectMapper;
     }
 
-    public List<VerinaSaleRow> pullNewSales(boolean updateCheckpoint) {
-        // Si no hay checkpoint, arranca “desde lejos” para no traer todo.
-        // Ajusta la fecha según tu necesidad.
-        LocalDateTime from = checkpointRepository
+    public int runOnce() throws Exception {
+        LocalDateTime lastDateTime = checkpointRepository
                 .getLastDateTime(SOURCE)
-                .orElse(LocalDateTime.of(2026, 1, 1, 0, 0));
+                .orElse(LocalDateTime.now().minusDays(2));
 
-        List<VerinaSaleRow> rows = verinaSalesRepository.findSalesSince(from);
+        List<VerinaTicketRow> rows = verinaPurchaseReader.fetchAfter(lastDateTime, FETCH_LIMIT);
 
-        if (updateCheckpoint && !rows.isEmpty()) {
-            // Nos quedamos con la fecha máxima que regresó Verina (ya viene ORDER BY fecha asc, pero no confío)
-            LocalDateTime maxFecha = rows.stream()
-                    .map(VerinaSaleRow::fecha)
-                    .max(LocalDateTime::compareTo)
-                    .orElse(from);
+        LocalDateTime maxFecha = lastDateTime;
+        int processed = 0;
 
+        for (VerinaTicketRow row : rows) {
+            if (row.fecha() == null) {
+                continue;
+            }
+
+            String purchaseId = "VERINA-" + row.idSucursal() + "-" + row.ticket();
+            String payloadJson = objectMapper.writeValueAsString(row);
+
+            boolean inserted = purchaseEventRepository.insertIfNotExists(
+                    purchaseId,
+                    SOURCE,
+                    row.fecha(),
+                    row.idSucursal(),
+                    row.ticket(),
+                    row.telefono(),
+                    row.nombreAutomovilista(),
+                    row.email(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    payloadJson
+            );
+
+            if (inserted) {
+                processed++;
+
+                String phoneE164 = phoneNormalizer.toE164OrNull(row.telefono());
+
+                if (phoneE164 == null) {
+                    log.warn("Venta insertada pero sin teléfono válido. purchaseId={} tel={}", purchaseId, row.telefono());
+                } else {
+                    String ticketValue = "VERINA-" + row.idSucursal() + "-" + row.ticket();
+
+                    try {
+                        boolean ok = clientifyService.upsertUltimaCompraTicketAndTagByPhone(
+                                phoneE164,
+                                ticketValue
+                        );
+                        if (!ok) {
+                            log.warn("No se encontró contacto exacto en Clientify para phone={}. purchaseId={}", phoneE164, purchaseId);
+                        }
+                    } catch (Exception ex) {
+                        log.error("Error actualizando Clientify. purchaseId={} phone={}", purchaseId, phoneE164, ex);
+                    }
+                }
+            }
+
+            if (row.fecha().isAfter(maxFecha)) {
+                maxFecha = row.fecha();
+            }
+        }
+
+        if (maxFecha.isAfter(lastDateTime)) {
             checkpointRepository.upsertLastDateTime(SOURCE, maxFecha);
         }
 
-        return rows;
+        return processed;
     }
 }
