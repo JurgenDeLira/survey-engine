@@ -1,6 +1,6 @@
 package com.batteryplus.survey.connector.verina;
 
-//SQL (SELECT incremental)
+// SQL (SELECT incremental)
 public class VerinaQueries {
     private VerinaQueries() {}
 
@@ -42,10 +42,34 @@ public class VerinaQueries {
             t.IDSucursal,
             t.Sucursal,
             t.Numero AS Ticket,
-            t.Fecha,
-            CONCAT_WS(' ', g.Automovilista, g.Automovilista_PA, g.Automovilista_SA) AS Nombre_Automovilista,
+            t.Fecha AS ME_Fecha_ultima_compra,
+
+            CASE
+                WHEN t.IDSucursal IN (1, 2, 3, 4, 5, 10, 12) THEN 'Los Mochis'
+                WHEN t.IDSucursal IN (6, 7, 8, 9, 11, 13) THEN 'Culiacan'
+                ELSE ''
+            END AS Propietario,
+
+            t.Subfamilia AS ME_Gama,
+            t.Marca AS ME_Marca_bateria,
+            t.Producto AS ME_Bateria_adquirida,
+
+            g.Automovilista AS Nombre,
+            CONCAT_WS(' ', g.Automovilista_PA, g.Automovilista_SA) AS Apellido,
             g.Telefono,
-            g.Email
+            g.Email AS Correo_electronico,
+
+            g.Marca AS ME_Marca_auto,
+            g.Modelo AS ME_Modelo_auto,
+            TRY_CAST(g.Tipo AS INT) AS ME_Anio_auto,
+            CONVERT(DATE, g.FechaFin) AS ME_Fecha_fin_garantia,
+
+            'Mexico' AS Pais,
+            '' AS Estado_Provincia,
+            '' AS Ciudad,
+            'Verina' AS Origen,
+            'Activo' AS Estado
+
         FROM Tickets_numerados t
         LEFT JOIN Garantias_numeradas g
             ON t.Numero = g.IDTicket

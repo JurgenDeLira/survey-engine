@@ -55,9 +55,13 @@ public class VerinaPullService {
 
         LocalDateTime maxFecha = lastDateTime;
         int processed = 0;
+        int duplicates = 0;
+        int invalidPhone = 0;
+
+        log.info("Iniciando pull Verina. source={} lastDateTime={} fetched={}", SOURCE, lastDateTime, rows.size());
 
         for (VerinaTicketRow row : rows) {
-            if (row.fecha() == null) {
+            if (row.fechaUltimaCompra() == null) {
                 continue;
             }
 
@@ -67,16 +71,16 @@ public class VerinaPullService {
             boolean inserted = purchaseEventRepository.insertIfNotExists(
                     purchaseId,
                     SOURCE,
-                    row.fecha(),
+                    row.fechaUltimaCompra(),
                     row.idSucursal(),
                     row.ticket(),
                     row.telefono(),
-                    row.nombreAutomovilista(),
-                    row.email(),
-                    null,
-                    null,
-                    null,
-                    null,
+                    buildNombreCompleto(row),
+                    row.correoElectronico(),
+                    null,   // familia
+                    row.meMarcaBateria(),
+                    row.meBateriaAdquirida(),
+                    null,   // cantidad
                     payloadJson
             );
 
@@ -86,33 +90,49 @@ public class VerinaPullService {
                 String phoneE164 = phoneNormalizer.toE164OrNull(row.telefono());
 
                 if (phoneE164 == null) {
+                    invalidPhone++;
                     log.warn("Venta insertada pero sin teléfono válido. purchaseId={} tel={}", purchaseId, row.telefono());
                 } else {
                     String ticketValue = "VERINA-" + row.idSucursal() + "-" + row.ticket();
 
                     try {
-                        boolean ok = clientifyService.upsertUltimaCompraTicketAndTagByPhone(
+                        boolean ok = clientifyService.upsertContactFromSale(
                                 phoneE164,
-                                ticketValue
+                                ticketValue,
+                                row
                         );
                         if (!ok) {
-                            log.warn("No se encontró contacto exacto en Clientify para phone={}. purchaseId={}", phoneE164, purchaseId);
+                            log.warn("No se pudo crear/actualizar contacto en Clientify. phone={} purchaseId={}", phoneE164, purchaseId);
                         }
                     } catch (Exception ex) {
                         log.error("Error actualizando Clientify. purchaseId={} phone={}", purchaseId, phoneE164, ex);
                     }
                 }
+            } else {
+                duplicates++;
             }
 
-            if (row.fecha().isAfter(maxFecha)) {
-                maxFecha = row.fecha();
+            if (row.fechaUltimaCompra().isAfter(maxFecha)) {
+                maxFecha = row.fechaUltimaCompra();
             }
         }
 
         if (maxFecha.isAfter(lastDateTime)) {
             checkpointRepository.upsertLastDateTime(SOURCE, maxFecha);
+            log.info("Checkpoint actualizado. source={} newLastDateTime={}", SOURCE, maxFecha);
         }
 
+        log.info(
+                "Pull Verina finalizado. source={} fetched={} inserted={} duplicates={} invalidPhone={}",
+                SOURCE, rows.size(), processed, duplicates, invalidPhone
+        );
+
         return processed;
+    }
+
+    private String buildNombreCompleto(VerinaTicketRow row) {
+        String nombre = row.nombre() != null ? row.nombre().trim() : "";
+        String apellido = row.apellido() != null ? row.apellido().trim() : "";
+        return (nombre + " " + apellido).trim();
     }
 }
