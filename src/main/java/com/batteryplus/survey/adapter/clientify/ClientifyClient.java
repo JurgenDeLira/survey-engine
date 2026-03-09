@@ -1,6 +1,6 @@
 package com.batteryplus.survey.adapter.clientify;
 
-//# WebClient calls
+// # WebClient calls
 import com.batteryplus.survey.config.ClientifyConfig;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -41,6 +41,16 @@ public class ClientifyClient {
                 .block();
     }
 
+    public ClientifyContact createContact(CreateContactRequest payload) {
+        return web.post()
+                .uri("/contacts/")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(ClientifyContact.class)
+                .block();
+    }
+
     /** PATCH /contacts/{id}/ con campos opcionales */
     public ClientifyContact patchContact(long contactId, PatchContactRequest payload) {
         return web.patch()
@@ -56,6 +66,9 @@ public class ClientifyClient {
 
     public record ClientifyContact(
             Long id,
+            String first_name,
+            String last_name,
+            String email,
             List<Phone> phones,
             List<String> tags,
             List<CustomField> custom_fields
@@ -72,6 +85,19 @@ public class ClientifyClient {
     ) {
         public record Result(Long id, List<ClientifyContact.Phone> phones) {}
     }
+
+    public record CreateContactRequest(
+            String first_name,
+            String last_name,
+            String email,
+            List<CreatePhone> phones,
+            List<String> tags
+    ) {}
+
+    public record CreatePhone(
+            Integer type,
+            String phone
+    ) {}
 
     public record PatchContactRequest(
             List<CustomFieldValue> custom_fields,

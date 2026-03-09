@@ -1,10 +1,13 @@
 package com.batteryplus.survey.api;
 
-//reintentos/manual run (futuro)
+// reintentos/manual run (futuro)
 import com.batteryplus.survey.adapter.clientify.ClientifyService;
+import com.batteryplus.survey.core.model.VerinaTicketRow;
 import com.batteryplus.survey.core.normalize.PhoneNormalizer;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
 
 @RestController
 @RequestMapping("/admin")
@@ -20,11 +23,14 @@ public class AdminController {
 
     /**
      * Prueba rápida:
-     * POST http://localhost:8080/admin/clientify/test
+     * POST http://localhost:9080/admin/clientify/test
      * body:
      * {
      *   "phone": "6681507452",
-     *   "ticket": "VERINA-7-12345"
+     *   "ticket": "VERINA-7-12345",
+     *   "nombre": "Jorge",
+     *   "apellido": "De Lira",
+     *   "email": "jorge@test.com"
      * }
      */
     @PostMapping("/clientify/test")
@@ -41,10 +47,56 @@ public class AdminController {
                     .body(new TestClientifyResponse(false, phoneE164, "ticket requerido"));
         }
 
-        boolean ok = clientifyService.upsertUltimaCompraTicketAndTagByPhone(phoneE164, req.ticket());
-        return ResponseEntity.ok(new TestClientifyResponse(ok, phoneE164, ok ? "OK" : "No se encontró contacto exacto por teléfono"));
+        VerinaTicketRow fakeRow = new VerinaTicketRow(
+                0,
+                "",
+                0L,
+                LocalDateTime.now(),
+
+                "",
+                "",
+                "",
+                "",
+
+                req.nombre() != null ? req.nombre() : "",
+                req.apellido() != null ? req.apellido() : "",
+                phoneE164,
+                req.email(),
+
+                "",
+                "",
+                null,
+                null,
+
+                "Mexico",
+                "",
+                "",
+                "AdminTest",
+                "Activo"
+        );
+
+        boolean ok = clientifyService.upsertContactFromSale(
+                phoneE164,
+                req.ticket(),
+                fakeRow
+        );
+
+        return ResponseEntity.ok(
+                new TestClientifyResponse(
+                        ok,
+                        phoneE164,
+                        ok ? "OK" : "No se pudo crear/actualizar contacto"
+                )
+        );
     }
 
-    public record TestClientifyRequest(String phone, String ticket) {}
+    public record TestClientifyRequest(
+            String phone,
+            String ticket,
+            String nombre,
+            String apellido,
+            String email
+    ) {}
+
     public record TestClientifyResponse(boolean ok, String phoneE164, String message) {}
 }
