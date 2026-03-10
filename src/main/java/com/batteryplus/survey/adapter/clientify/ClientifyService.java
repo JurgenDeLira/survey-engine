@@ -12,8 +12,6 @@ import java.util.List;
 public class ClientifyService {
 
     private static final Logger log = LoggerFactory.getLogger(ClientifyService.class);
-
-    private static final String TAG_ENCUESTA = "encuesta_satisfaccion";
     private static final Integer PHONE_TYPE_MOBILE = 1;
 
     private final ClientifyClient client;
@@ -26,12 +24,6 @@ public class ClientifyService {
         this.cfg = cfg;
     }
 
-    /**
-     * Busca contacto por teléfono.
-     * Si no existe, lo crea.
-     * Luego actualiza el custom field "ME_Ultima compra ticket"
-     * y deja la tag "encuesta_satisfaccion".
-     */
     public boolean upsertContactFromSale(String phoneE164, String ticketValue, VerinaTicketRow row) {
         if (phoneE164 == null || phoneE164.isBlank()) return false;
         if (ticketValue == null || ticketValue.isBlank()) return false;
@@ -45,16 +37,33 @@ public class ClientifyService {
                 log.warn("No se pudo crear contacto en Clientify. phone={}", phoneE164);
                 return false;
             }
+            log.info("Contacto creado en Clientify. contactId={} phone={}", contactId, phoneE164);
+        } else {
+            log.info("Contacto encontrado en Clientify. contactId={} phone={}", contactId, phoneE164);
         }
 
         long fieldId = cfg.getCustomFields().getUltimaCompraTicketId();
 
-        var payload = new ClientifyClient.PatchContactRequest(
-                List.of(new ClientifyClient.CustomFieldValue(fieldId, ticketValue)),
-                List.of(TAG_ENCUESTA)
+        var putPayload = new ClientifyClient.PutContactRequest(
+                safe(row.nombre()),
+                safe(row.apellido()),
+                safeNullable(row.correoElectronico()),
+                List.of(new ClientifyClient.CustomFieldValue(fieldId, ticketValue))
         );
 
-        client.patchContact(contactId, payload);
+        log.info("Clientify PUT -> contactId={} fieldId={} ticketValue={}", contactId, fieldId, ticketValue);
+
+        var putResponse = client.putContact(contactId, putPayload);
+
+        log.info("Clientify PUT response -> contactId={} response={}", contactId, putResponse);
+
+        var tagResponse = client.addTagToContact(
+                contactId,
+                new ClientifyClient.TagRequest(encuestaTag())
+        );
+
+        log.info("Clientify tag response -> contactId={} response={}", contactId, tagResponse);
+
         return true;
     }
 
@@ -73,11 +82,24 @@ public class ClientifyService {
                 lastName,
                 email,
                 List.of(new ClientifyClient.CreatePhone(PHONE_TYPE_MOBILE, phoneE164)),
-                List.of(TAG_ENCUESTA)
+                List.of(encuestaTag())
+        );
+
+        log.info(
+                "Clientify create -> firstName={} lastName={} email={} phone={} tag={}",
+                firstName, lastName, email, phoneE164, encuestaTag()
         );
 
         var created = client.createContact(payload);
+
+        log.info("Clientify create response -> response={}", created);
+
         return created != null ? created.id() : null;
+    }
+
+    private String encuestaTag() {
+        String tag = cfg.getTags().getEncuestaSatisfaccion();
+        return (tag == null || tag.isBlank()) ? "encuesta_satisfaccion" : tag.trim();
     }
 
     private String safe(String value) {

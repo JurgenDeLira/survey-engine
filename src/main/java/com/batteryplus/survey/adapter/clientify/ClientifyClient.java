@@ -1,6 +1,5 @@
 package com.batteryplus.survey.adapter.clientify;
 
-// # WebClient calls
 import com.batteryplus.survey.config.ClientifyConfig;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -16,7 +15,7 @@ public class ClientifyClient {
     public ClientifyClient(ClientifyConfig cfg) {
         this.web = WebClient.builder()
                 .baseUrl(cfg.getBaseUrl())
-                .defaultHeader("Authorization", cfg.getToken()) // "Token xxxxx"
+                .defaultHeader("Authorization", cfg.getToken())
                 .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
                 .build();
     }
@@ -51,9 +50,8 @@ public class ClientifyClient {
                 .block();
     }
 
-    /** PATCH /contacts/{id}/ con campos opcionales */
-    public ClientifyContact patchContact(long contactId, PatchContactRequest payload) {
-        return web.patch()
+    public ClientifyContact putContact(long contactId, PutContactRequest payload) {
+        return web.put()
                 .uri("/contacts/{id}/", contactId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
@@ -62,7 +60,15 @@ public class ClientifyClient {
                 .block();
     }
 
-    // -------- DTOs mínimos --------
+    public TagResponse addTagToContact(long contactId, TagRequest payload) {
+        return web.post()
+                .uri("/contacts/{id}/tags/", contactId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(TagResponse.class)
+                .block();
+    }
 
     public record ClientifyContact(
             Long id,
@@ -99,10 +105,19 @@ public class ClientifyClient {
             String phone
     ) {}
 
-    public record PatchContactRequest(
-            List<CustomFieldValue> custom_fields,
-            List<String> tags
+    public record PutContactRequest(
+            String first_name,
+            String last_name,
+            String email,
+            List<CustomFieldValue> custom_fields
     ) {}
 
     public record CustomFieldValue(Long field, String value) {}
+
+    public record TagRequest(String name) {}
+
+    public record TagResponse(
+            Long id,
+            String name
+    ) {}
 }
