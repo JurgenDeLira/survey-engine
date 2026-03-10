@@ -40,19 +40,14 @@ public class ClientifyClient {
                 .block();
     }
 
-    public ClientifyContact createContact(CreateContactRequest payload) {
+    /**
+     * Upsert práctico:
+     * si phone/email ya existe, Clientify suele actualizar el contacto existente.
+     * si no existe, lo crea.
+     */
+    public ClientifyContact upsertContact(UpsertContactRequest payload) {
         return web.post()
                 .uri("/contacts/")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(payload)
-                .retrieve()
-                .bodyToMono(ClientifyContact.class)
-                .block();
-    }
-
-    public ClientifyContact putContact(long contactId, PutContactRequest payload) {
-        return web.put()
-                .uri("/contacts/{id}/", contactId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .retrieve()
@@ -69,6 +64,8 @@ public class ClientifyClient {
                 .bodyToMono(TagResponse.class)
                 .block();
     }
+
+    // -------- DTOs --------
 
     public record ClientifyContact(
             Long id,
@@ -92,24 +89,13 @@ public class ClientifyClient {
         public record Result(Long id, List<ClientifyContact.Phone> phones) {}
     }
 
-    public record CreateContactRequest(
+    public record UpsertContactRequest(
             String first_name,
             String last_name,
             String email,
-            List<CreatePhone> phones,
+            String phone,
+            List<CustomFieldValue> custom_fields,
             List<String> tags
-    ) {}
-
-    public record CreatePhone(
-            Integer type,
-            String phone
-    ) {}
-
-    public record PutContactRequest(
-            String first_name,
-            String last_name,
-            String email,
-            List<CustomFieldValue> custom_fields
     ) {}
 
     public record CustomFieldValue(Long field, String value) {}
