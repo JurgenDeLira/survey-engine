@@ -73,14 +73,16 @@ public class VerinaPullService {
                     SOURCE,
                     row.fechaUltimaCompra(),
                     row.idSucursal(),
+                    row.sucursal(),
                     row.ticket(),
                     row.telefono(),
                     buildNombreCompleto(row),
                     row.correoElectronico(),
-                    null,   // familia
+                    row.propietario(),
+                    null,
                     row.meMarcaBateria(),
                     row.meBateriaAdquirida(),
-                    null,   // cantidad
+                    null,
                     payloadJson
             );
 
@@ -131,8 +133,8 @@ public class VerinaPullService {
     }
 
     private String buildNombreCompleto(VerinaTicketRow row) {
-        String nombre = row.nombre() != null ? row.nombre().trim() : "";
-        String apellido = row.apellido() != null ? row.apellido().trim() : "";
+        String nombre = row.nombre() == null ? "" : row.nombre().trim();
+        String apellido = row.apellido() == null ? "" : row.apellido().trim();
         return (nombre + " " + apellido).trim();
     }
 }
