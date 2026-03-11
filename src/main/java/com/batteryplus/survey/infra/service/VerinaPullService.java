@@ -73,7 +73,7 @@ public class VerinaPullService {
                     SOURCE,
                     row.fechaUltimaCompra(),
                     row.idSucursal(),
-                    row.sucursal(),
+                    row.me14Sucursal(),
                     row.ticket(),
                     row.telefono(),
                     buildNombreCompleto(row),
@@ -83,6 +83,16 @@ public class VerinaPullService {
                     row.meMarcaBateria(),
                     row.meBateriaAdquirida(),
                     null,
+                    row.meGama(),
+                    row.meMarcaAuto(),
+                    row.meModeloAuto(),
+                    row.meAnioAuto(),
+                    row.meFechaFinGarantia(),
+                    row.pais(),
+                    row.estadoProvincia(),
+                    row.ciudad(),
+                    row.origen(),
+                    row.estado(),
                     payloadJson
             );
 

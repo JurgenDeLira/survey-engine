@@ -10,6 +10,7 @@ public class VerinaRowMappers {
     public static final RowMapper<VerinaTicketRow> VERINA_TICKET_ROW = (rs, rowNum) -> new VerinaTicketRow(
             rs.getInt("IDSucursal"),
             rs.getString("Sucursal"),
+            rs.getString("Sucursal_Formateada"),
             rs.getLong("Ticket"),
             rs.getTimestamp("ME_Fecha_ultima_compra").toLocalDateTime(),
 

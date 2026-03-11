@@ -50,6 +50,7 @@ public class AdminController {
         VerinaTicketRow fakeRow = new VerinaTicketRow(
                 0,
                 "",
+                "",
                 0L,
                 LocalDateTime.now(),
 
@@ -72,7 +73,7 @@ public class AdminController {
                 "",
                 "",
                 "AdminTest",
-                "Activo"
+                "venta"
         );
 
         boolean ok = clientifyService.upsertContactFromSale(

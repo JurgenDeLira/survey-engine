@@ -34,6 +34,16 @@ public class PurchaseEventRepository {
             String marca,
             String producto,
             Integer cantidad,
+            String meGama,
+            String meMarcaAuto,
+            String meModeloAuto,
+            Integer meAnioAuto,
+            String meFechaFinGarantia,
+            String pais,
+            String estadoProvincia,
+            String ciudad,
+            String origen,
+            String estado,
             String payloadJson
     ) {
         try {
@@ -42,10 +52,14 @@ public class PurchaseEventRepository {
                     purchase_id, source, fecha, id_sucursal, sucursal, ticket,
                     telefono, nombre, email, propietario,
                     familia, marca, producto, cantidad,
+                    me_gama, me_marca_auto, me_modelo_auto, me_anio_auto, me_fecha_fin_garantia,
+                    pais, estado_provincia, ciudad, origen, estado,
                     payload_json
                 ) VALUES (?, ?, ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?, ?,
+                         ?, ?, ?, ?, ?,
+                         ?, ?, ?, ?, ?,
                          ?)
                 """,
                     purchaseId,
@@ -62,6 +76,16 @@ public class PurchaseEventRepository {
                     marca,
                     producto,
                     cantidad,
+                    meGama,
+                    meMarcaAuto,
+                    meModeloAuto,
+                    meAnioAuto,
+                    meFechaFinGarantia,
+                    pais,
+                    estadoProvincia,
+                    ciudad,
+                    origen,
+                    estado,
                     payloadJson
             );
             return true;
