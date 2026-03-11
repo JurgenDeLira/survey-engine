@@ -67,3 +67,4 @@ public class SurveyDispatchRepository {
             String producto,
             java.time.LocalDateTime fecha
     ) {}
+}
