@@ -1,22 +1,27 @@
 package com.batteryplus.survey.adapter.clientify;
 
-// # WebClient calls
 import com.batteryplus.survey.config.ClientifyConfig;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.List;
 
 @Component
 public class ClientifyClient {
 
+    private static final Logger log = LoggerFactory.getLogger(ClientifyClient.class);
+
     private final WebClient web;
 
     public ClientifyClient(ClientifyConfig cfg) {
         this.web = WebClient.builder()
                 .baseUrl(cfg.getBaseUrl())
-                .defaultHeader("Authorization", cfg.getToken()) // "Token xxxxx"
+                .defaultHeader("Authorization", cfg.getToken())
                 .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
                 .build();
     }
@@ -42,33 +47,64 @@ public class ClientifyClient {
     }
 
     public ClientifyContact createContact(CreateContactRequest payload) {
+        try {
+            return web.post()
+                    .uri("/contacts/")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .bodyToMono(ClientifyContact.class)
+                    .block();
+        } catch (WebClientResponseException ex) {
+            log.error(
+                    "Clientify createContact error. payload={} status={} body={}",
+                    payload,
+                    ex.getStatusCode(),
+                    ex.getResponseBodyAsString(),
+                    ex
+            );
+            throw ex;
+        }
+    }
+
+    public ClientifyContact updateContact(long contactId, UpdateContactRequest payload) {
+        try {
+            return web.put()
+                    .uri("/contacts/{id}/", contactId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .bodyToMono(ClientifyContact.class)
+                    .block();
+        } catch (WebClientResponseException ex) {
+            log.error(
+                    "Clientify updateContact error. contactId={} payload={} status={} body={}",
+                    contactId,
+                    payload,
+                    ex.getStatusCode(),
+                    ex.getResponseBodyAsString(),
+                    ex
+            );
+            throw ex;
+        }
+    }
+
+    public TagResponse addTagToContact(long contactId, TagRequest payload) {
         return web.post()
-                .uri("/contacts/")
+                .uri("/contacts/{id}/tags/", contactId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .retrieve()
-                .bodyToMono(ClientifyContact.class)
+                .bodyToMono(TagResponse.class)
                 .block();
     }
-
-    /** PATCH /contacts/{id}/ con campos opcionales */
-    public ClientifyContact patchContact(long contactId, PatchContactRequest payload) {
-        return web.patch()
-                .uri("/contacts/{id}/", contactId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(payload)
-                .retrieve()
-                .bodyToMono(ClientifyContact.class)
-                .block();
-    }
-
-    // -------- DTOs mínimos --------
 
     public record ClientifyContact(
             Long id,
             String first_name,
             String last_name,
             String email,
+            String status,
             List<Phone> phones,
             List<String> tags,
             List<CustomField> custom_fields
@@ -86,12 +122,24 @@ public class ClientifyClient {
         public record Result(Long id, List<ClientifyContact.Phone> phones) {}
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record CreateContactRequest(
             String first_name,
             String last_name,
             String email,
+            String status,
             List<CreatePhone> phones,
+            List<CustomFieldValue> custom_fields,
             List<String> tags
+    ) {}
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record UpdateContactRequest(
+            String first_name,
+            String last_name,
+            String email,
+            String status,
+            List<CustomFieldValue> custom_fields
     ) {}
 
     public record CreatePhone(
@@ -99,10 +147,12 @@ public class ClientifyClient {
             String phone
     ) {}
 
-    public record PatchContactRequest(
-            List<CustomFieldValue> custom_fields,
-            List<String> tags
-    ) {}
-
     public record CustomFieldValue(Long field, String value) {}
+
+    public record TagRequest(String name) {}
+
+    public record TagResponse(
+            Long id,
+            String name
+    ) {}
 }

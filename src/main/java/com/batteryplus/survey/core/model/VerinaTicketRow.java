@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 public record VerinaTicketRow(
         int idSucursal,
         String sucursal,
+        String me14Sucursal,
         long ticket,
         LocalDateTime fechaUltimaCompra,
 
