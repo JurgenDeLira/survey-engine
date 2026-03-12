@@ -2,12 +2,9 @@ package com.batteryplus.survey.infra.repository;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.sql.Timestamp;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @ConditionalOnProperty(prefix = "app.datasource.staging", name = "enabled", havingValue = "true")
@@ -20,98 +17,95 @@ public class SurveyDispatchRepository {
         this.stagingJdbc = stagingJdbc;
     }
 
+    // =========================
+    // ETAPA 1: PREPARACION
+    // =========================
+
     public List<PendingSurveyRow> findPending(int limit) {
         return stagingJdbc.query("""
             SELECT TOP (?)
-                pe.purchase_id,
-                pe.fecha,
-                pe.id_sucursal,
-                pe.sucursal,
-                pe.ticket,
-                pe.telefono,
-                pe.nombre,
-                pe.email,
-                pe.propietario,
-                pe.marca,
-                pe.producto,
-                pe.me_gama,
-                pe.me_marca_auto,
-                pe.me_modelo_auto,
-                pe.me_anio_auto,
-                pe.me_fecha_fin_garantia,
-                pe.pais,
-                pe.estado_provincia,
-                pe.ciudad,
-                pe.origen,
-                pe.estado
-            FROM dbo.purchase_events pe
-            LEFT JOIN dbo.survey_checkpoint sc
-                ON sc.ticket_id = pe.purchase_id
-            WHERE sc.ticket_id IS NULL
-              AND pe.telefono IS NOT NULL
-              AND LTRIM(RTRIM(pe.telefono)) <> ''
-            ORDER BY pe.fecha ASC, pe.purchase_id ASC
+                purchase_id,
+                telefono,
+                nombre,
+                propietario,
+                sucursal
+            FROM dbo.purchase_events
+            WHERE survey_status = 'pending'
+            ORDER BY fecha ASC, created_at ASC
             """,
                 (rs, rowNum) -> new PendingSurveyRow(
                         rs.getString("purchase_id"),
-                        rs.getTimestamp("fecha").toLocalDateTime(),
-                        rs.getInt("id_sucursal"),
-                        rs.getString("sucursal"),
-                        rs.getLong("ticket"),
                         rs.getString("telefono"),
                         rs.getString("nombre"),
-                        rs.getString("email"),
                         rs.getString("propietario"),
-                        rs.getString("marca"),
-                        rs.getString("producto"),
-                        rs.getString("me_gama"),
-                        rs.getString("me_marca_auto"),
-                        rs.getString("me_modelo_auto"),
-                        rs.getObject("me_anio_auto", Integer.class),
-                        rs.getString("me_fecha_fin_garantia"),
-                        rs.getString("pais"),
-                        rs.getString("estado_provincia"),
-                        rs.getString("ciudad"),
-                        rs.getString("origen"),
-                        rs.getString("estado")
+                        rs.getString("sucursal")
                 ),
                 limit
         );
     }
 
-    public boolean markPrepared(String purchaseId) {
-        try {
-            stagingJdbc.update("""
-                INSERT INTO dbo.survey_checkpoint (ticket_id)
-                VALUES (?)
-                """, purchaseId);
-            return true;
-        } catch (DuplicateKeyException ex) {
-            return false;
-        }
+    public boolean updateStatus(String purchaseId, String newStatus) {
+        int updated = stagingJdbc.update("""
+            UPDATE dbo.purchase_events
+            SET survey_status = ?
+            WHERE purchase_id = ?
+            """, newStatus, purchaseId);
+
+        return updated > 0;
+    }
+
+
+    // =========================
+    // ETAPA 2: DISPATCH
+    // =========================
+
+    public List<ReadySurveyRow> findReadyToDispatch(int limit) {
+        return stagingJdbc.query("""
+            SELECT TOP (?)
+                purchase_id,
+                telefono,
+                nombre,
+                propietario,
+                sucursal
+            FROM dbo.purchase_events
+            WHERE survey_status = 'ready_for_campaign'
+            ORDER BY fecha ASC, created_at ASC
+            """,
+                (rs, rowNum) -> new ReadySurveyRow(
+                        rs.getString("purchase_id"),
+                        rs.getString("telefono"),
+                        rs.getString("nombre"),
+                        rs.getString("propietario"),
+                        rs.getString("sucursal")
+                ),
+                limit
+        );
+    }
+
+    public boolean markDispatched(String purchaseId) {
+        int updated = stagingJdbc.update("""
+            UPDATE dbo.purchase_events
+            SET survey_status = 'dispatched'
+            WHERE purchase_id = ?
+              AND survey_status = 'ready_for_campaign'
+            """, purchaseId);
+
+        return updated > 0;
     }
 
     public record PendingSurveyRow(
             String purchaseId,
-            LocalDateTime fecha,
-            int idSucursal,
-            String sucursal,
-            long ticket,
             String telefono,
             String nombre,
-            String email,
             String propietario,
-            String marca,
-            String producto,
-            String meGama,
-            String meMarcaAuto,
-            String meModeloAuto,
-            Integer meAnioAuto,
-            String meFechaFinGarantia,
-            String pais,
-            String estadoProvincia,
-            String ciudad,
-            String origen,
-            String estado
+            String sucursal
+    ) {}
+
+    public record ReadySurveyRow(
+            String purchaseId,
+            String telefono,
+            String nombre,
+            String propietario,
+            String sucursal
     ) {}
 }

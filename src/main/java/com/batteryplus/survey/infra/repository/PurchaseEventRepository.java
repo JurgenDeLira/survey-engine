@@ -54,12 +54,14 @@ public class PurchaseEventRepository {
                     familia, marca, producto, cantidad,
                     me_gama, me_marca_auto, me_modelo_auto, me_anio_auto, me_fecha_fin_garantia,
                     pais, estado_provincia, ciudad, origen, estado,
+                    survey_status,
                     payload_json
                 ) VALUES (?, ?, ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?, ?, ?,
                          ?, ?, ?, ?, ?,
+                         ?,
                          ?)
                 """,
                     purchaseId,
@@ -86,6 +88,7 @@ public class PurchaseEventRepository {
                     ciudad,
                     origen,
                     estado,
+                    "pending",
                     payloadJson
             );
             return true;

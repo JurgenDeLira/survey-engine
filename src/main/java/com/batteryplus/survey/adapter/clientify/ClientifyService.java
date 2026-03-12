@@ -5,6 +5,7 @@ import com.batteryplus.survey.core.model.VerinaTicketRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.List;
 import java.util.Locale;
@@ -16,6 +17,7 @@ public class ClientifyService {
     private static final Logger log = LoggerFactory.getLogger(ClientifyService.class);
     private static final Integer PHONE_TYPE_MOBILE = 1;
     private static final String STATUS_VENTA = "venta";
+    private static final int MAX_RETRIES = 3;
 
     private final ClientifyClient client;
     private final ClientifyConfig cfg;
@@ -30,27 +32,17 @@ public class ClientifyService {
         if (ticketValue == null || ticketValue.isBlank()) return false;
         if (row == null) return false;
 
-        String safeFirstName = sanitizeName(row.nombre());
-        String safeLastName = sanitizeName(row.apellido());
         String safeEmail = sanitizeEmail(row.correoElectronico());
-
-        PhoneMatchResult phoneMatch = findExactContactIdByPhone(phoneE164);
-
-        if (phoneMatch.ambiguous()) {
-            log.warn("Se detectaron múltiples contactos con el mismo teléfono exacto. Se omite sincronización. phone={}", phoneE164);
-            return false;
-        }
+        Long contactId = findExactContactIdByPhone(phoneE164);
 
         long fieldId = cfg.getCustomFields().getUltimaCompraTicketId();
 
-        if (phoneMatch.contactId() != null) {
-            Long contactId = phoneMatch.contactId();
-
+        if (contactId != null) {
             log.info("Contacto encontrado en Clientify. contactId={} phone={}", contactId, phoneE164);
 
             var payload = new ClientifyClient.UpdateContactRequest(
-                    safeFirstName,
-                    safeLastName,
+                    cleanName(row.nombre()),
+                    cleanLastName(row.apellido()),
                     safeEmail,
                     STATUS_VENTA,
                     List.of(new ClientifyClient.CustomFieldValue(fieldId, ticketValue))
@@ -67,12 +59,7 @@ public class ClientifyService {
 
             tryAddTag(contactId);
 
-            if (response == null) {
-                log.warn("Clientify no regresó respuesta al actualizar contacto. contactId={}", contactId);
-                return false;
-            }
-
-            if (response.custom_fields() == null || response.custom_fields().isEmpty()) {
+            if (response != null && (response.custom_fields() == null || response.custom_fields().isEmpty())) {
                 log.warn(
                         "Clientify aceptó la actualización pero no reflejó custom_fields. contactId={} fieldId={} ticketValue={}",
                         contactId, fieldId, ticketValue
@@ -83,8 +70,8 @@ public class ClientifyService {
         }
 
         var createPayload = new ClientifyClient.CreateContactRequest(
-                safeFirstName,
-                safeLastName,
+                cleanName(row.nombre()),
+                cleanLastName(row.apellido()),
                 safeEmail,
                 STATUS_VENTA,
                 List.of(new ClientifyClient.CreatePhone(PHONE_TYPE_MOBILE, phoneE164)),
@@ -94,7 +81,7 @@ public class ClientifyService {
 
         log.info(
                 "Clientify create -> firstName={} lastName={} email={} phone={} status={} tag={}",
-                safeFirstName, safeLastName, safeEmail, phoneE164, STATUS_VENTA, encuestaTag()
+                cleanName(row.nombre()), cleanLastName(row.apellido()), safeEmail, phoneE164, STATUS_VENTA, encuestaTag()
         );
 
         var created = executeWithRetry(() -> client.createContact(createPayload));
@@ -118,11 +105,9 @@ public class ClientifyService {
         return true;
     }
 
-    private PhoneMatchResult findExactContactIdByPhone(String phoneE164) {
+    private Long findExactContactIdByPhone(String phoneE164) {
         var search = client.searchContacts(phoneE164, 20);
-        if (search == null || search.results() == null) {
-            return new PhoneMatchResult(null, false);
-        }
+        if (search == null || search.results() == null) return null;
 
         String normalizedTarget = normalizePhone(phoneE164);
         Long found = null;
@@ -135,20 +120,22 @@ public class ClientifyService {
 
                 if (normalizedTarget.equals(normalizePhone(phone.phone()))) {
                     if (found != null && !found.equals(result.id())) {
-                        return new PhoneMatchResult(null, true);
+                        log.warn("Más de un contacto coincide con el mismo teléfono exacto. phone={}", phoneE164);
+                        return null;
                     }
                     found = result.id();
                 }
             }
         }
 
-        return new PhoneMatchResult(found, false);
+        return found;
     }
 
     private void tryAddTag(Long contactId) {
         try {
-            var tagResponse = executeWithRetry(() ->
-                    client.addTagToContact(contactId, new ClientifyClient.TagRequest(encuestaTag()))
+            var tagResponse = client.addTagToContact(
+                    contactId,
+                    new ClientifyClient.TagRequest(encuestaTag())
             );
             log.info("Clientify tag response -> contactId={} response={}", contactId, tagResponse);
         } catch (Exception ex) {
@@ -156,46 +143,9 @@ public class ClientifyService {
         }
     }
 
-    private <T> T executeWithRetry(Supplier<T> action) {
-        int maxRetries = 3;
-        int attempt = 0;
-
-        while (true) {
-            try {
-                return action.get();
-            } catch (Exception ex) {
-                attempt++;
-
-                if (attempt >= maxRetries) {
-                    throw ex;
-                }
-
-                log.warn("Clientify retry {}/{}", attempt, maxRetries);
-
-                try {
-                    Thread.sleep(500L * attempt);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Retry interrumpido", ie);
-                }
-            }
-        }
-    }
-
     private String encuestaTag() {
         String tag = cfg.getTags().getEncuestaSatisfaccion();
         return (tag == null || tag.isBlank()) ? "prueba_jorge" : tag.trim();
-    }
-
-    private String sanitizeName(String value) {
-        if (value == null) return "";
-        String v = value.trim();
-
-        if (v.equals("-") || v.equals(".") || v.equals(",")) {
-            return "";
-        }
-
-        return v;
     }
 
     private String sanitizeEmail(String email) {
@@ -207,19 +157,35 @@ public class ClientifyService {
         if (lower.contains("servicioadomicilio")
                 || lower.contains("facturacion")
                 || lower.contains("ventas")
-                || lower.contains("info@")
-                || lower.contains("batteryplus")
-                || lower.contains("bpa")
-                || lower.endsWith("@batteryplus.mx")) {
+                || lower.contains("servdom")
+                || lower.contains("servicio.domicilio")
+                || lower.endsWith("@batteryplus.mx")
+                || lower.equals("aa@gmail.com")) {
             return null;
         }
 
         return safe;
     }
 
+    private String cleanName(String value) {
+        String s = safe(value);
+        if (s.isBlank() || s.equals("-")) return "SIN NOMBRE";
+        return s;
+    }
+
+    private String cleanLastName(String value) {
+        String s = safe(value);
+        if (s.isBlank() || s.equals("-")) return "SIN APELLIDO";
+        return s;
+    }
+
     private String normalizePhone(String raw) {
         if (raw == null) return "";
         return raw.replaceAll("[^0-9+]", "");
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private String safeNullable(String value) {
@@ -228,5 +194,41 @@ public class ClientifyService {
         return trimmed.isBlank() ? null : trimmed;
     }
 
-    private record PhoneMatchResult(Long contactId, boolean ambiguous) {}
+    private <T> T executeWithRetry(Supplier<T> action) {
+        RuntimeException last = null;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                return action.get();
+            } catch (WebClientResponseException ex) {
+                // 4xx = payload/negocio, no reintentar
+                if (ex.getStatusCode().is4xxClientError()) {
+                    throw ex;
+                }
+
+                last = ex;
+                if (attempt < MAX_RETRIES) {
+                    log.warn("Clientify retry {}/{}", attempt, MAX_RETRIES);
+                    sleep(700L * attempt);
+                }
+            } catch (RuntimeException ex) {
+                last = ex;
+                if (attempt < MAX_RETRIES) {
+                    log.warn("Clientify retry {}/{}", attempt, MAX_RETRIES);
+                    sleep(700L * attempt);
+                }
+            }
+        }
+
+        throw last;
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(ex);
+        }
+    }
 }

@@ -1,6 +1,7 @@
 package com.batteryplus.survey.adapter.clientify;
 
 import com.batteryplus.survey.config.ClientifyConfig;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -25,22 +26,24 @@ public class ClientifyClient {
                 .build();
     }
 
+    public ClientifyContact getContact(long contactId) {
+        return web.get()
+                .uri("/contacts/{id}/", contactId)
+                .retrieve()
+                .bodyToMono(ClientifyContact.class)
+                .block();
+    }
+
     public ClientifyContactSearch searchContacts(String search, int pageSize) {
-        try {
-            return web.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/contacts/")
-                            .queryParam("search", search)
-                            .queryParam("page_size", pageSize)
-                            .build())
-                    .retrieve()
-                    .bodyToMono(ClientifyContactSearch.class)
-                    .block();
-        } catch (WebClientResponseException ex) {
-            log.error("Clientify searchContacts error. status={} body={}",
-                    ex.getStatusCode(), ex.getResponseBodyAsString(), ex);
-            throw ex;
-        }
+        return web.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/contacts/")
+                        .queryParam("search", search)
+                        .queryParam("page_size", pageSize)
+                        .build())
+                .retrieve()
+                .bodyToMono(ClientifyContactSearch.class)
+                .block();
     }
 
     public ClientifyContact createContact(CreateContactRequest payload) {
@@ -53,8 +56,13 @@ public class ClientifyClient {
                     .bodyToMono(ClientifyContact.class)
                     .block();
         } catch (WebClientResponseException ex) {
-            log.error("Clientify createContact error. payload={} status={} body={}",
-                    payload, ex.getStatusCode(), ex.getResponseBodyAsString(), ex);
+            log.error(
+                    "Clientify createContact error. payload={} status={} body={}",
+                    payload,
+                    ex.getStatusCode(),
+                    ex.getResponseBodyAsString(),
+                    ex
+            );
             throw ex;
         }
     }
@@ -69,26 +77,26 @@ public class ClientifyClient {
                     .bodyToMono(ClientifyContact.class)
                     .block();
         } catch (WebClientResponseException ex) {
-            log.error("Clientify updateContact error. contactId={} payload={} status={} body={}",
-                    contactId, payload, ex.getStatusCode(), ex.getResponseBodyAsString(), ex);
+            log.error(
+                    "Clientify updateContact error. contactId={} payload={} status={} body={}",
+                    contactId,
+                    payload,
+                    ex.getStatusCode(),
+                    ex.getResponseBodyAsString(),
+                    ex
+            );
             throw ex;
         }
     }
 
     public TagResponse addTagToContact(long contactId, TagRequest payload) {
-        try {
-            return web.post()
-                    .uri("/contacts/{id}/tags/", contactId)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(payload)
-                    .retrieve()
-                    .bodyToMono(TagResponse.class)
-                    .block();
-        } catch (WebClientResponseException ex) {
-            log.error("Clientify addTagToContact error. contactId={} payload={} status={} body={}",
-                    contactId, payload, ex.getStatusCode(), ex.getResponseBodyAsString(), ex);
-            throw ex;
-        }
+        return web.post()
+                .uri("/contacts/{id}/tags/", contactId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(TagResponse.class)
+                .block();
     }
 
     public record ClientifyContact(
@@ -114,6 +122,7 @@ public class ClientifyClient {
         public record Result(Long id, List<ClientifyContact.Phone> phones) {}
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record CreateContactRequest(
             String first_name,
             String last_name,
@@ -124,6 +133,7 @@ public class ClientifyClient {
             List<String> tags
     ) {}
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record UpdateContactRequest(
             String first_name,
             String last_name,

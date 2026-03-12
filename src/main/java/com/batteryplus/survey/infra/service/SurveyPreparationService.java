@@ -4,10 +4,12 @@ import com.batteryplus.survey.core.normalize.PhoneNormalizer;
 import com.batteryplus.survey.infra.repository.SurveyDispatchRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+@ConditionalOnProperty(prefix = "app.datasource.staging", name = "enabled", havingValue = "true")
 @Service
 public class SurveyPreparationService {
 
@@ -40,6 +42,9 @@ public class SurveyPreparationService {
 
                 if (phoneE164 == null) {
                     invalidPhone++;
+
+                    surveyDispatchRepository.updateStatus(row.purchaseId(), "invalid_phone");
+
                     log.warn(
                             "Venta pendiente no preparada por teléfono inválido. purchaseId={} tel={}",
                             row.purchaseId(), row.telefono()
@@ -47,7 +52,10 @@ public class SurveyPreparationService {
                     continue;
                 }
 
-                boolean marked = surveyDispatchRepository.markPrepared(row.purchaseId());
+                boolean marked = surveyDispatchRepository.updateStatus(
+                        row.purchaseId(),
+                        "ready_for_campaign"
+                );
 
                 if (marked) {
                     prepared++;
@@ -55,11 +63,18 @@ public class SurveyPreparationService {
                             "Venta marcada lista para campaña. purchaseId={} propietario={} sucursal={} telefono={}",
                             row.purchaseId(), row.propietario(), row.sucursal(), phoneE164
                     );
+                } else {
+                    log.warn(
+                            "No se pudo marcar ready_for_campaign. purchaseId={}",
+                            row.purchaseId()
+                    );
                 }
+
             } catch (Exception ex) {
                 log.error(
-                        "Error preparando venta para encuesta. purchaseId={} telefono={}",
-                        row.purchaseId(), row.telefono(), ex
+                        "Error preparando encuesta. purchaseId={}",
+                        row.purchaseId(),
+                        ex
                 );
             }
         }
