@@ -53,6 +53,7 @@ public class AdminController {
                 "",
                 0L,
                 LocalDateTime.now(),
+                "TEST-TICKET",
 
                 "",
                 "",

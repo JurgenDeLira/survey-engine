@@ -26,14 +26,6 @@ public class ClientifyClient {
                 .build();
     }
 
-    public ClientifyContact getContact(long contactId) {
-        return web.get()
-                .uri("/contacts/{id}/", contactId)
-                .retrieve()
-                .bodyToMono(ClientifyContact.class)
-                .block();
-    }
-
     public ClientifyContactSearch searchContacts(String search, int pageSize) {
         return web.get()
                 .uri(uriBuilder -> uriBuilder
@@ -119,7 +111,12 @@ public class ClientifyClient {
             String previous,
             List<Result> results
     ) {
-        public record Result(Long id, List<ClientifyContact.Phone> phones) {}
+        public record Result(
+                Long id,
+                String first_name,
+                String last_name,
+                List<ClientifyContact.Phone> phones
+        ) {}
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -139,7 +136,7 @@ public class ClientifyClient {
             String last_name,
             String email,
             String status,
-            List<CustomFieldValue> custom_fields
+            String custom_field_505220
     ) {}
 
     public record CreatePhone(

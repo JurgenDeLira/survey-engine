@@ -2,13 +2,18 @@ package com.batteryplus.survey.adapter.clientify;
 
 import com.batteryplus.survey.config.ClientifyConfig;
 import com.batteryplus.survey.core.model.VerinaTicketRow;
+import com.batteryplus.survey.core.normalize.PhoneNormalizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.function.Supplier;
 
 @Service
@@ -18,117 +23,214 @@ public class ClientifyService {
     private static final Integer PHONE_TYPE_MOBILE = 1;
     private static final String STATUS_VENTA = "venta";
     private static final int MAX_RETRIES = 3;
+    private static final int SEARCH_PAGE_SIZE = 50;
 
     private final ClientifyClient client;
     private final ClientifyConfig cfg;
+    private final ObjectMapper objectMapper;
+    private final PhoneNormalizer phoneNormalizer;
 
-    public ClientifyService(ClientifyClient client, ClientifyConfig cfg) {
+    public ClientifyService(
+            ClientifyClient client,
+            ClientifyConfig cfg,
+            ObjectMapper objectMapper,
+            PhoneNormalizer phoneNormalizer
+    ) {
         this.client = client;
         this.cfg = cfg;
+        this.objectMapper = objectMapper;
+        this.phoneNormalizer = phoneNormalizer;
     }
 
     public boolean upsertContactFromSale(String phoneE164, String ticketValue, VerinaTicketRow row) {
-        if (phoneE164 == null || phoneE164.isBlank()) return false;
+        log.warn("VERSION NUEVA CLIENTIFYSERVICE ACTIVA");
+
+        String normalizedPhone = phoneNormalizer.toE164OrNull(phoneE164);
+
+        if (normalizedPhone == null || normalizedPhone.isBlank()) return false;
         if (ticketValue == null || ticketValue.isBlank()) return false;
         if (row == null) return false;
 
         String safeEmail = sanitizeEmail(row.correoElectronico());
-        Long contactId = findExactContactIdByPhone(phoneE164);
+        Long existingContactId = findExistingContactIdByPhone(normalizedPhone);
 
-        long fieldId = cfg.getCustomFields().getUltimaCompraTicketId();
+        if (existingContactId != null) {
+            log.info("Contacto encontrado en Clientify. contactId={} phone={}", existingContactId, normalizedPhone);
 
-        if (contactId != null) {
-            log.info("Contacto encontrado en Clientify. contactId={} phone={}", contactId, phoneE164);
-
-            var payload = new ClientifyClient.UpdateContactRequest(
+            var updatePayload = new ClientifyClient.UpdateContactRequest(
                     cleanName(row.nombre()),
                     cleanLastName(row.apellido()),
                     safeEmail,
                     STATUS_VENTA,
-                    List.of(new ClientifyClient.CustomFieldValue(fieldId, ticketValue))
+                    null
             );
 
-            log.info(
-                    "Clientify PUT -> contactId={} fieldId={} ticketValue={} status={}",
-                    contactId, fieldId, ticketValue, STATUS_VENTA
-            );
+            try {
+                log.info("Clientify update payload JSON={}", objectMapper.writeValueAsString(updatePayload));
+            } catch (Exception e) {
+                log.warn("No se pudo serializar payload de update", e);
+            }
 
-            var response = executeWithRetry(() -> client.updateContact(contactId, payload));
+            var updated = executeWithRetry(() -> client.updateContact(existingContactId, updatePayload));
 
-            log.info("Clientify PUT response -> contactId={} response={}", contactId, response);
+            log.info("Clientify PUT response -> contactId={} response={}", existingContactId, updated);
 
-            tryAddTag(contactId);
+            tryAddTag(existingContactId);
 
-            if (response != null && (response.custom_fields() == null || response.custom_fields().isEmpty())) {
+            if (updated == null || updated.id() == null) {
+                log.warn("Clientify no devolvió contacto actualizado. contactId={} ticketValue={}", existingContactId, ticketValue);
+                return false;
+            }
+
+            if (!containsTicketFieldValue(updated.custom_fields(), ticketValue)) {
                 log.warn(
-                        "Clientify aceptó la actualización pero no reflejó custom_fields. contactId={} fieldId={} ticketValue={}",
-                        contactId, fieldId, ticketValue
+                        "Clientify aceptó la actualización pero no reflejó el campo ticket. contactId={} ticketValue={}",
+                        existingContactId, ticketValue
                 );
             }
 
             return true;
         }
 
+        List<ClientifyClient.CustomFieldValue> customFields = buildCustomFields(ticketValue, row);
+
         var createPayload = new ClientifyClient.CreateContactRequest(
                 cleanName(row.nombre()),
                 cleanLastName(row.apellido()),
                 safeEmail,
                 STATUS_VENTA,
-                List.of(new ClientifyClient.CreatePhone(PHONE_TYPE_MOBILE, phoneE164)),
-                List.of(new ClientifyClient.CustomFieldValue(fieldId, ticketValue)),
+                List.of(new ClientifyClient.CreatePhone(PHONE_TYPE_MOBILE, normalizedPhone)),
+                customFields,
                 List.of(encuestaTag())
         );
 
-        log.info(
-                "Clientify create -> firstName={} lastName={} email={} phone={} status={} tag={}",
-                cleanName(row.nombre()), cleanLastName(row.apellido()), safeEmail, phoneE164, STATUS_VENTA, encuestaTag()
-        );
+        try {
+            log.info("Clientify create payload JSON={}", objectMapper.writeValueAsString(createPayload));
+        } catch (Exception e) {
+            log.warn("No se pudo serializar payload de create", e);
+        }
 
         var created = executeWithRetry(() -> client.createContact(createPayload));
 
         log.info("Clientify create response -> response={}", created);
 
         if (created == null || created.id() == null) {
-            log.warn("No se pudo crear contacto en Clientify. phone={} ticketValue={}", phoneE164, ticketValue);
+            log.warn("No se pudo crear contacto en Clientify. phone={} ticketValue={}", normalizedPhone, ticketValue);
             return false;
         }
 
         tryAddTag(created.id());
 
-        if (created.custom_fields() == null || created.custom_fields().isEmpty()) {
+        if (!containsTicketFieldValue(created.custom_fields(), ticketValue)) {
             log.warn(
-                    "Clientify creó/actualizó contacto pero no reflejó custom_fields. contactId={} fieldId={} ticketValue={}",
-                    created.id(), fieldId, ticketValue
+                    "Clientify creó contacto pero no reflejó el campo ticket. contactId={} ticketValue={}",
+                    created.id(), ticketValue
             );
         }
 
         return true;
     }
 
-    private Long findExactContactIdByPhone(String phoneE164) {
-        var search = client.searchContacts(phoneE164, 20);
-        if (search == null || search.results() == null) return null;
+    private Long findExistingContactIdByPhone(String phoneE164) {
+        SearchVariants variants = buildSearchVariants(phoneE164);
 
-        String normalizedTarget = normalizePhone(phoneE164);
-        Long found = null;
+        log.info(
+                "Clientify search variants -> input={} plus52={} plus521={} local10={} comparable={}",
+                phoneE164,
+                variants.plus52(),
+                variants.plus521(),
+                variants.local10(),
+                variants.comparable()
+        );
 
-        for (var result : search.results()) {
-            if (result == null || result.phones() == null) continue;
+        Set<String> queries = new LinkedHashSet<>();
+        if (variants.plus52() != null) queries.add(variants.plus52());
+        if (variants.plus521() != null) queries.add(variants.plus521());
+        if (variants.local10() != null) queries.add(variants.local10());
 
-            for (var phone : result.phones()) {
-                if (phone == null || phone.phone() == null) continue;
+        for (String query : queries) {
+            ClientifyClient.ClientifyContactSearch response;
+            try {
+                response = executeWithRetry(() -> client.searchContacts(query, SEARCH_PAGE_SIZE));
+            } catch (Exception ex) {
+                log.warn("Falló búsqueda Clientify. query={}", query, ex);
+                continue;
+            }
 
-                if (normalizedTarget.equals(normalizePhone(phone.phone()))) {
-                    if (found != null && !found.equals(result.id())) {
-                        log.warn("Más de un contacto coincide con el mismo teléfono exacto. phone={}", phoneE164);
-                        return null;
+            int results = response == null || response.results() == null ? 0 : response.results().size();
+            log.info("Clientify search query='{}' results={}", query, results);
+
+            if (response == null || response.results() == null) {
+                continue;
+            }
+
+            for (ClientifyClient.ClientifyContactSearch.Result result : response.results()) {
+                if (result == null || result.phones() == null) {
+                    continue;
+                }
+
+                for (ClientifyClient.ClientifyContact.Phone phone : result.phones()) {
+                    String comparable = comparablePhone(phone.phone());
+
+                    log.info(
+                            "Clientify candidate -> query='{}' contactId={} phone={} comparable={}",
+                            query,
+                            result.id(),
+                            phone.phone(),
+                            comparable
+                    );
+
+                    if (variants.comparable().equals(comparable)) {
+                        return result.id();
                     }
-                    found = result.id();
                 }
             }
         }
 
-        return found;
+        return null;
+    }
+
+    private List<ClientifyClient.CustomFieldValue> buildCustomFields(String ticketValue, VerinaTicketRow row) {
+        var f = cfg.getCustomFields();
+        List<ClientifyClient.CustomFieldValue> fields = new ArrayList<>();
+
+        String valueToSend = row.meUltimaCompraTicket();
+        if (valueToSend == null || valueToSend.isBlank()) {
+            valueToSend = ticketValue;
+        }
+
+        addField(fields, f.getUltimaCompraTicketId(), valueToSend);
+        return fields;
+    }
+
+    private void addField(List<ClientifyClient.CustomFieldValue> fields, long fieldId, String value) {
+        if (fieldId <= 0) return;
+        if (value == null) return;
+
+        String clean = value.trim();
+        if (clean.isBlank() || clean.equals("-")) return;
+
+        fields.add(new ClientifyClient.CustomFieldValue(fieldId, clean));
+    }
+
+    private boolean containsTicketFieldValue(List<ClientifyClient.ClientifyContact.CustomField> customFields, String expectedValue) {
+        if (customFields == null || customFields.isEmpty()) return false;
+        if (expectedValue == null || expectedValue.isBlank()) return false;
+
+        String expectedFieldName = "me_ultima compra ticket";
+
+        for (ClientifyClient.ClientifyContact.CustomField field : customFields) {
+            if (field == null) continue;
+
+            String apiFieldName = field.field() == null ? "" : field.field().trim().toLowerCase(Locale.ROOT);
+            String apiValue = field.value() == null ? "" : field.value().trim();
+
+            if (expectedFieldName.equals(apiFieldName) && expectedValue.trim().equals(apiValue)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void tryAddTag(Long contactId) {
@@ -179,11 +281,6 @@ public class ClientifyService {
         return s;
     }
 
-    private String normalizePhone(String raw) {
-        if (raw == null) return "";
-        return raw.replaceAll("[^0-9+]", "");
-    }
-
     private String safe(String value) {
         return value == null ? "" : value.trim();
     }
@@ -194,6 +291,49 @@ public class ClientifyService {
         return trimmed.isBlank() ? null : trimmed;
     }
 
+    private SearchVariants buildSearchVariants(String phoneE164) {
+        String digits = onlyDigits(phoneE164);
+        String local10 = null;
+
+        if (digits.length() >= 10) {
+            local10 = digits.substring(digits.length() - 10);
+        }
+
+        String plus52 = local10 == null ? null : "+52" + local10;
+        String plus521 = local10 == null ? null : "+521" + local10;
+        String comparable = plus52 == null ? null : comparablePhone(plus52);
+
+        return new SearchVariants(plus52, plus521, local10, comparable);
+    }
+
+    private String comparablePhone(String raw) {
+        String digits = onlyDigits(raw);
+        if (digits.isBlank()) return "";
+
+        if (digits.startsWith("521") && digits.length() >= 13) {
+            return "52" + digits.substring(3);
+        }
+
+        if (digits.startsWith("52") && digits.length() >= 12) {
+            return digits;
+        }
+
+        if (digits.length() == 10) {
+            return "52" + digits;
+        }
+
+        if (digits.length() > 12) {
+            return digits.substring(digits.length() - 12);
+        }
+
+        return digits;
+    }
+
+    private String onlyDigits(String value) {
+        if (value == null) return "";
+        return value.replaceAll("\\D", "");
+    }
+
     private <T> T executeWithRetry(Supplier<T> action) {
         RuntimeException last = null;
 
@@ -201,7 +341,6 @@ public class ClientifyService {
             try {
                 return action.get();
             } catch (WebClientResponseException ex) {
-                // 4xx = payload/negocio, no reintentar
                 if (ex.getStatusCode().is4xxClientError()) {
                     throw ex;
                 }
@@ -231,4 +370,11 @@ public class ClientifyService {
             throw new RuntimeException(ex);
         }
     }
+
+    private record SearchVariants(
+            String plus52,
+            String plus521,
+            String local10,
+            String comparable
+    ) {}
 }

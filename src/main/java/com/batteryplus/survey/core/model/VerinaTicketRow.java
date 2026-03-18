@@ -11,6 +11,7 @@ public record VerinaTicketRow(
         String me14Sucursal,
         long ticket,
         LocalDateTime fechaUltimaCompra,
+        String meUltimaCompraTicket,
 
         String propietario,
         String meGama,

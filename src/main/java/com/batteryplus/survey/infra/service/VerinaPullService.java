@@ -105,7 +105,7 @@ public class VerinaPullService {
                     invalidPhone++;
                     log.warn("Venta insertada pero sin teléfono válido. purchaseId={} tel={}", purchaseId, row.telefono());
                 } else {
-                    String ticketValue = "VERINA-" + row.idSucursal() + "-" + row.ticket();
+                    String ticketValue = row.meUltimaCompraTicket();
 
                     try {
                         boolean ok = clientifyService.upsertContactFromSale(

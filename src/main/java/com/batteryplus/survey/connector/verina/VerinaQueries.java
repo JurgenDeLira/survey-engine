@@ -42,6 +42,7 @@ public class VerinaQueries {
             t.Sucursal,
             t.Numero AS Ticket,
             t.Fecha AS ME_Fecha_ultima_compra,
+            CONCAT('VERINA-', t.IDSucursal, '-', t.Numero) AS ME_Ultima_compra_ticket,
 
             CASE
                 WHEN t.IDSucursal IN (6, 7, 8, 9, 11, 13) THEN 'MARTIN S.'
