@@ -105,7 +105,7 @@ public class VerinaPullService {
                     invalidPhone++;
                     log.warn("Venta insertada pero sin teléfono válido. purchaseId={} tel={}", purchaseId, row.telefono());
                 } else {
-                    String ticketValue = row.meUltimaCompraTicket();
+                    String ticketValue = "VERINA-" + row.idSucursal() + "-" + row.ticket();
 
                     try {
                         boolean ok = clientifyService.upsertContactFromSale(
@@ -113,8 +113,13 @@ public class VerinaPullService {
                                 ticketValue,
                                 row
                         );
+
                         if (!ok) {
-                            log.warn("No se pudo crear/actualizar contacto en Clientify. phone={} purchaseId={}", phoneE164, purchaseId);
+                            log.warn(
+                                    "No se pudo crear/actualizar contacto en Clientify. phone={} purchaseId={}",
+                                    phoneE164,
+                                    purchaseId
+                            );
                         }
                     } catch (Exception ex) {
                         log.error("Error actualizando Clientify. purchaseId={} phone={}", purchaseId, phoneE164, ex);

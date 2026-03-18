@@ -13,7 +13,6 @@ public class VerinaRowMappers {
             rs.getString("Sucursal_Formateada"),
             rs.getLong("Ticket"),
             rs.getTimestamp("ME_Fecha_ultima_compra").toLocalDateTime(),
-            rs.getString("ME_Ultima_compra_ticket"),
 
             rs.getString("Propietario"),
             rs.getString("ME_Gama"),

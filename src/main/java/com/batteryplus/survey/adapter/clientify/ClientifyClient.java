@@ -91,6 +91,28 @@ public class ClientifyClient {
                 .block();
     }
 
+    public ClientifyContact updateContactDynamic(long contactId, java.util.Map<String, Object> payload) {
+        try {
+            return web.put()
+                    .uri("/contacts/{id}/", contactId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .bodyToMono(ClientifyContact.class)
+                    .block();
+        } catch (WebClientResponseException ex) {
+            log.error(
+                    "Clientify updateContactDynamic error. contactId={} payload={} status={} body={}",
+                    contactId,
+                    payload,
+                    ex.getStatusCode(),
+                    ex.getResponseBodyAsString(),
+                    ex
+            );
+            throw ex;
+        }
+    }
+
     public record ClientifyContact(
             Long id,
             String first_name,
@@ -136,7 +158,7 @@ public class ClientifyClient {
             String last_name,
             String email,
             String status,
-            String custom_field_505220
+            List<CustomFieldValue> custom_fields
     ) {}
 
     public record CreatePhone(

@@ -27,7 +27,6 @@ public class AdminClientifyTestController {
                     request.me14Sucursal(),
                     request.ticket(),
                     parseDateTime(request.fechaUltimaCompra()),
-                    request.meUltimaCompraTicket(),
 
                     request.propietario(),
                     request.meGama(),
@@ -92,7 +91,6 @@ public class AdminClientifyTestController {
             String me14Sucursal,
             long ticket,
             String fechaUltimaCompra,
-            String meUltimaCompraTicket,
 
             String propietario,
             String meGama,
