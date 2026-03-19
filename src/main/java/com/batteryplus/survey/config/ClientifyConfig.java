@@ -9,11 +9,15 @@ public class ClientifyConfig {
 
     private String baseUrl;
     private String token;
+
+    private String webBaseUrl;
+    private String webCookie;
+    private String webCsrfToken;
+
     private CustomFields customFields = new CustomFields();
     private Tags tags = new Tags();
 
     public static class CustomFields {
-        private long ultimaCompraTicketId;
         private long fechaUltimaCompraId;
         private long bateriaAdquiridaId;
         private long sucursalId;
@@ -23,14 +27,6 @@ public class ClientifyConfig {
         private long marcaBateriaId;
         private long gamaId;
         private long fechaFinGarantiaId;
-
-        public long getUltimaCompraTicketId() {
-            return ultimaCompraTicketId;
-        }
-
-        public void setUltimaCompraTicketId(long ultimaCompraTicketId) {
-            this.ultimaCompraTicketId = ultimaCompraTicketId;
-        }
 
         public long getFechaUltimaCompraId() {
             return fechaUltimaCompraId;
@@ -131,6 +127,30 @@ public class ClientifyConfig {
 
     public void setToken(String token) {
         this.token = token;
+    }
+
+    public String getWebBaseUrl() {
+        return webBaseUrl;
+    }
+
+    public void setWebBaseUrl(String webBaseUrl) {
+        this.webBaseUrl = webBaseUrl;
+    }
+
+    public String getWebCookie() {
+        return webCookie;
+    }
+
+    public void setWebCookie(String webCookie) {
+        this.webCookie = webCookie;
+    }
+
+    public String getWebCsrfToken() {
+        return webCsrfToken;
+    }
+
+    public void setWebCsrfToken(String webCsrfToken) {
+        this.webCsrfToken = webCsrfToken;
     }
 
     public CustomFields getCustomFields() {

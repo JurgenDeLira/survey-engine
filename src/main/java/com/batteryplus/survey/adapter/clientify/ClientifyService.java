@@ -10,11 +10,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.format.DateTimeFormatter;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -59,7 +57,13 @@ public class ClientifyService {
         if (existingContactId != null) {
             log.info("Contacto encontrado en Clientify. contactId={} phone={}", existingContactId, normalizedPhone);
 
-            Map<String, Object> updatePayload = buildDynamicUpdatePayload(row, safeEmail);
+            var updatePayload = new ClientifyClient.UpdateContactRequest(
+                    cleanName(row.nombre()),
+                    cleanLastName(row.apellido()),
+                    safeEmail,
+                    STATUS_VENTA,
+                    null
+            );
 
             try {
                 log.info("Clientify update payload JSON={}", objectMapper.writeValueAsString(updatePayload));
@@ -67,18 +71,17 @@ public class ClientifyService {
                 log.warn("No se pudo serializar payload de update", e);
             }
 
-            var updated = executeWithRetry(() -> client.updateContactDynamic(existingContactId, updatePayload));
+            var updated = executeWithRetry(() -> client.updateContact(existingContactId, updatePayload));
 
             log.info("Clientify PUT response -> contactId={} response={}", existingContactId, updated);
 
+            updateFieldsInline(existingContactId, row);
             tryAddTag(existingContactId);
 
             if (updated == null || updated.id() == null) {
                 log.warn("Clientify no devolvió contacto actualizado. contactId={}", existingContactId);
                 return false;
             }
-
-            logCustomFieldsResult("UPDATE", existingContactId, updated.custom_fields());
 
             return true;
         }
@@ -110,7 +113,13 @@ public class ClientifyService {
 
         Long contactId = created.id();
 
-        Map<String, Object> secondStepUpdate = buildDynamicUpdatePayload(row, safeEmail);
+        var secondStepUpdate = new ClientifyClient.UpdateContactRequest(
+                cleanName(row.nombre()),
+                cleanLastName(row.apellido()),
+                safeEmail,
+                STATUS_VENTA,
+                null
+        );
 
         try {
             log.info("Clientify second-step update payload JSON={}", objectMapper.writeValueAsString(secondStepUpdate));
@@ -118,10 +127,11 @@ public class ClientifyService {
             log.warn("No se pudo serializar payload de second-step update", e);
         }
 
-        var updatedAfterCreate = executeWithRetry(() -> client.updateContactDynamic(contactId, secondStepUpdate));
+        var updatedAfterCreate = executeWithRetry(() -> client.updateContact(contactId, secondStepUpdate));
 
         log.info("Clientify second-step PUT response -> contactId={} response={}", contactId, updatedAfterCreate);
 
+        updateFieldsInline(contactId, row);
         tryAddTag(contactId);
 
         if (updatedAfterCreate == null || updatedAfterCreate.id() == null) {
@@ -129,41 +139,40 @@ public class ClientifyService {
             return false;
         }
 
-        logCustomFieldsResult("CREATE+UPDATE", contactId, updatedAfterCreate.custom_fields());
-
         return true;
     }
 
-    private Map<String, Object> buildDynamicUpdatePayload(VerinaTicketRow row, String safeEmail) {
+    private void updateFieldsInline(Long contactId, VerinaTicketRow row) {
         var f = cfg.getCustomFields();
-        Map<String, Object> payload = new LinkedHashMap<>();
 
-        payload.put("first_name", cleanName(row.nombre()));
-        payload.put("last_name", cleanLastName(row.apellido()));
-        payload.put("email", safeEmail);
-        payload.put("status", STATUS_VENTA);
-
-        putCustomField(payload, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row));
-        putCustomField(payload, f.getBateriaAdquiridaId(), row.meBateriaAdquirida());
-        putCustomField(payload, f.getSucursalId(), row.me14Sucursal());
-        putCustomField(payload, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto()));
-        putCustomField(payload, f.getModeloAutoId(), row.meModeloAuto());
-        putCustomField(payload, f.getMarcaAutoId(), row.meMarcaAuto());
-        putCustomField(payload, f.getMarcaBateriaId(), row.meMarcaBateria());
-        putCustomField(payload, f.getGamaId(), row.meGama());
-        putCustomField(payload, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia()));
-
-        return payload;
+        update(contactId, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row));
+        update(contactId, f.getBateriaAdquiridaId(), row.meBateriaAdquirida());
+        update(contactId, f.getSucursalId(), row.me14Sucursal());
+        update(contactId, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto()));
+        update(contactId, f.getModeloAutoId(), row.meModeloAuto());
+        update(contactId, f.getMarcaAutoId(), row.meMarcaAuto());
+        update(contactId, f.getMarcaBateriaId(), row.meMarcaBateria());
+        update(contactId, f.getGamaId(), row.meGama());
+        update(contactId, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia()));
     }
 
-    private void putCustomField(Map<String, Object> payload, long fieldId, String value) {
-        if (fieldId <= 0) return;
-        if (value == null) return;
+    private void update(Long contactId, long fieldId, String value) {
+        if (contactId == null || fieldId <= 0 || value == null) return;
 
         String clean = value.trim();
         if (clean.isBlank() || clean.equals("-")) return;
 
-        payload.put("custom_field_" + fieldId, clean);
+        String response = executeWithRetry(() ->
+                client.updateCustomFieldInline(contactId, fieldId, clean)
+        );
+
+        log.info(
+                "INLINE OK contactId={} fieldId={} value={} response={}",
+                contactId,
+                fieldId,
+                clean,
+                response
+        );
     }
 
     private String formatFechaUltimaCompra(VerinaTicketRow row) {
@@ -183,24 +192,6 @@ public class ClientifyService {
         }
 
         return clean;
-    }
-
-    private void logCustomFieldsResult(String step, Long contactId, List<ClientifyClient.ClientifyContact.CustomField> customFields) {
-        if (customFields == null || customFields.isEmpty()) {
-            log.warn("Clientify {} sin custom_fields visibles. contactId={}", step, contactId);
-            return;
-        }
-
-        for (ClientifyClient.ClientifyContact.CustomField field : customFields) {
-            if (field == null) continue;
-            log.info(
-                    "Clientify {} custom_field -> contactId={} field={} value={}",
-                    step,
-                    contactId,
-                    field.field(),
-                    field.value()
-            );
-        }
     }
 
     private Long findExistingContactIdByPhone(String phoneE164) {
