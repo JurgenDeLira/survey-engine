@@ -6,7 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -19,24 +20,25 @@ public class ClientifyClient {
     private static final Logger log = LoggerFactory.getLogger(ClientifyClient.class);
 
     private final WebClient web;
-    private final WebClient webApp;
+    private final WebClient inlineWeb;
+    private final ClientifyConfig cfg;
 
     public ClientifyClient(ClientifyConfig cfg) {
+        this.cfg = cfg;
+
         this.web = WebClient.builder()
                 .baseUrl(cfg.getBaseUrl())
                 .defaultHeader("Authorization", cfg.getToken())
                 .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
                 .build();
 
-        this.webApp = WebClient.builder()
-                .baseUrl(cfg.getWebBaseUrl())
-                .defaultHeader("Accept", "application/json, text/javascript, */*; q=0.01")
-                .defaultHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-                .defaultHeader("Cookie", cfg.getWebCookie())
-                .defaultHeader("X-CSRFToken", cfg.getWebCsrfToken())
+        this.inlineWeb = WebClient.builder()
+                .baseUrl(cfg.getInlineBaseUrl())
+                .defaultHeader("Cookie", cfg.getInlineCookie())
+                .defaultHeader("X-CSRFToken", cfg.getInlineCsrfToken())
                 .defaultHeader("X-Requested-With", "XMLHttpRequest")
-                .defaultHeader("Origin", "https://app.clientify.com")
-                .defaultHeader("Referer", "https://app.clientify.com/")
+                .defaultHeader("Referer", cfg.getInlineBaseUrl() + "/")
+                .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
                 .build();
     }
 
@@ -128,21 +130,32 @@ public class ClientifyClient {
     }
 
     public String updateCustomFieldInline(long contactId, long fieldId, String value) {
+        return updateInlineField(contactId, "custom_field_" + fieldId, value);
+    }
+
+    public String updateInlineField(long contactId, String fieldName, String value) {
         try {
-            return webApp.post()
-                    .uri("/object-inline-edit/23/")
-                    .body(BodyInserters
-                            .fromFormData("name", "custom_field_" + fieldId)
-                            .with("value", value)
-                            .with("pk", String.valueOf(contactId)))
+            MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+            form.add("name", fieldName);
+            form.add("value", value);
+            form.add("pk", String.valueOf(contactId));
+
+            return inlineWeb.post()
+                    .uri(uriBuilder -> uriBuilder
+                            .path(cfg.getInlinePath())
+                            .queryParam("value", value)
+                            .build())
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .bodyValue(form)
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
+
         } catch (WebClientResponseException ex) {
             log.error(
-                    "INLINE EDIT ERROR contactId={} fieldId={} value={} status={} body={}",
+                    "Clientify updateInlineField error. contactId={} fieldName={} value={} status={} body={}",
                     contactId,
-                    fieldId,
+                    fieldName,
                     value,
                     ex.getStatusCode(),
                     ex.getResponseBodyAsString(),
@@ -158,6 +171,7 @@ public class ClientifyClient {
             String last_name,
             String email,
             String status,
+            String contact_source,
             List<Phone> phones,
             List<String> tags,
             List<CustomField> custom_fields
@@ -186,6 +200,7 @@ public class ClientifyClient {
             String last_name,
             String email,
             String status,
+            String contact_source,
             List<CreatePhone> phones,
             List<CustomFieldValue> custom_fields,
             List<String> tags
@@ -197,6 +212,7 @@ public class ClientifyClient {
             String last_name,
             String email,
             String status,
+            String contact_source,
             List<CustomFieldValue> custom_fields
     ) {}
 

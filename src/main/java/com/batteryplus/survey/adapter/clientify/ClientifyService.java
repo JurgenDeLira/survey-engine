@@ -20,8 +20,8 @@ import java.util.function.Supplier;
 public class ClientifyService {
 
     private static final Logger log = LoggerFactory.getLogger(ClientifyService.class);
+
     private static final Integer PHONE_TYPE_MOBILE = 1;
-    private static final String STATUS_VENTA = "venta";
     private static final int MAX_RETRIES = 3;
     private static final int SEARCH_PAGE_SIZE = 50;
     private static final DateTimeFormatter DATE_DD_MM_YYYY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -61,7 +61,8 @@ public class ClientifyService {
                     cleanName(row.nombre()),
                     cleanLastName(row.apellido()),
                     safeEmail,
-                    STATUS_VENTA,
+                    null,
+                    null,
                     null
             );
 
@@ -75,6 +76,7 @@ public class ClientifyService {
 
             log.info("Clientify PUT response -> contactId={} response={}", existingContactId, updated);
 
+            updateOwnerStatusOriginInline(existingContactId, row);
             updateFieldsInline(existingContactId, row);
             tryAddTag(existingContactId);
 
@@ -90,7 +92,8 @@ public class ClientifyService {
                 cleanName(row.nombre()),
                 cleanLastName(row.apellido()),
                 safeEmail,
-                STATUS_VENTA,
+                null,
+                null,
                 List.of(new ClientifyClient.CreatePhone(PHONE_TYPE_MOBILE, normalizedPhone)),
                 null,
                 List.of(encuestaTag())
@@ -117,7 +120,8 @@ public class ClientifyService {
                 cleanName(row.nombre()),
                 cleanLastName(row.apellido()),
                 safeEmail,
-                STATUS_VENTA,
+                null,
+                null,
                 null
         );
 
@@ -131,6 +135,7 @@ public class ClientifyService {
 
         log.info("Clientify second-step PUT response -> contactId={} response={}", contactId, updatedAfterCreate);
 
+        updateOwnerStatusOriginInline(contactId, row);
         updateFieldsInline(contactId, row);
         tryAddTag(contactId);
 
@@ -142,41 +147,175 @@ public class ClientifyService {
         return true;
     }
 
-    private void updateFieldsInline(Long contactId, VerinaTicketRow row) {
-        var f = cfg.getCustomFields();
+    private void updateOwnerStatusOriginInline(Long contactId, VerinaTicketRow row) {
+        if (contactId == null || row == null) return;
 
-        update(contactId, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row));
-        update(contactId, f.getBateriaAdquiridaId(), row.meBateriaAdquirida());
-        update(contactId, f.getSucursalId(), row.me14Sucursal());
-        update(contactId, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto()));
-        update(contactId, f.getModeloAutoId(), row.meModeloAuto());
-        update(contactId, f.getMarcaAutoId(), row.meMarcaAuto());
-        update(contactId, f.getMarcaBateriaId(), row.meMarcaBateria());
-        update(contactId, f.getGamaId(), row.meGama());
-        update(contactId, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia()));
+        updateOwnerInline(contactId, row.propietario());
+        updateStatusInline(contactId);
+        updateOrigenInline(contactId, row.origen());
     }
 
-    private void update(Long contactId, long fieldId, String value) {
-        if (contactId == null || fieldId <= 0 || value == null) return;
+    private void updateOwnerInline(Long contactId, String propietario) {
+        if (contactId == null) return;
+
+        Long ownerId = resolveOwnerId(propietario);
+        if (ownerId == null || ownerId <= 0) {
+            log.warn("No se pudo resolver owner para propietario='{}'", propietario);
+            return;
+        }
+
+        try {
+            String response = executeWithRetry(() ->
+                    client.updateInlineField(contactId, "owner", String.valueOf(ownerId))
+            );
+            log.info(
+                    "INLINE OWNER OK contactId={} propietario={} ownerId={} response={}",
+                    contactId,
+                    propietario,
+                    ownerId,
+                    response
+            );
+        } catch (Exception ex) {
+            log.error(
+                    "INLINE OWNER ERROR contactId={} propietario={} ownerId={}",
+                    contactId,
+                    propietario,
+                    ownerId,
+                    ex
+            );
+        }
+    }
+
+    private Long resolveOwnerId(String propietario) {
+        if (propietario == null) return null;
+
+        String clean = propietario.trim();
+        if (clean.isBlank()) return null;
+
+        if (clean.equalsIgnoreCase("MARTIN S.")) {
+            long id = cfg.getOwnerMartinId();
+            return id > 0 ? id : null;
+        }
+
+        if (clean.equalsIgnoreCase("Daniela Cota")) {
+            long id = cfg.getOwnerDanielaId();
+            return id > 0 ? id : null;
+        }
+
+        return null;
+    }
+
+    private void updateStatusInline(Long contactId) {
+        String statusValue = cfg.getStatusClientValue();
+        if (contactId == null) return;
+        if (statusValue == null || statusValue.isBlank()) return;
+
+        try {
+            String response = executeWithRetry(() ->
+                    client.updateInlineField(contactId, "status", statusValue.trim())
+            );
+            log.info("INLINE STATUS OK contactId={} value={} response={}", contactId, statusValue, response);
+        } catch (Exception ex) {
+            log.error("INLINE STATUS ERROR contactId={} value={}", contactId, statusValue, ex);
+        }
+    }
+
+    private void updateOrigenInline(Long contactId, String origen) {
+        if (contactId == null) return;
+
+        Long sourceId = resolveContactSourceId(origen);
+        if (sourceId == null || sourceId <= 0) {
+            log.warn("No se pudo resolver contact_source para origen='{}'", origen);
+            return;
+        }
+
+        try {
+            String response = executeWithRetry(() ->
+                    client.updateInlineField(contactId, "contact_source", String.valueOf(sourceId))
+            );
+            log.info(
+                    "INLINE ORIGEN OK contactId={} origen={} sourceId={} response={}",
+                    contactId,
+                    origen,
+                    sourceId,
+                    response
+            );
+        } catch (Exception ex) {
+            log.error(
+                    "INLINE ORIGEN ERROR contactId={} origen={} sourceId={}",
+                    contactId,
+                    origen,
+                    sourceId,
+                    ex
+            );
+        }
+    }
+
+    private Long resolveContactSourceId(String origen) {
+        if (origen == null) return null;
+
+        String clean = origen.trim();
+        if (clean.isBlank()) return null;
+
+        if (clean.equalsIgnoreCase("piso")) {
+            long id = cfg.getContactSourcePisoId();
+            return id > 0 ? id : null;
+        }
+
+        if (clean.equalsIgnoreCase("domicilio")) {
+            long id = cfg.getContactSourceDomicilioId();
+            return id > 0 ? id : null;
+        }
+
+        return null;
+    }
+
+    private void updateFieldsInline(Long contactId, VerinaTicketRow row) {
+        if (contactId == null || row == null) return;
+
+        var f = cfg.getCustomFields();
+
+        updateInline(contactId, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row));
+        updateInline(contactId, f.getBateriaAdquiridaId(), row.meBateriaAdquirida());
+        updateInline(contactId, f.getSucursalId(), row.me14Sucursal());
+        updateInline(contactId, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto()));
+        updateInline(contactId, f.getModeloAutoId(), row.meModeloAuto());
+        updateInline(contactId, f.getMarcaAutoId(), row.meMarcaAuto());
+        updateInline(contactId, f.getMarcaBateriaId(), row.meMarcaBateria());
+        updateInline(contactId, f.getGamaId(), row.meGama());
+        updateInline(contactId, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia()));
+    }
+
+    private void updateInline(Long contactId, long fieldId, String value) {
+        if (contactId == null) return;
+        if (fieldId <= 0) return;
+        if (value == null) return;
 
         String clean = value.trim();
         if (clean.isBlank() || clean.equals("-")) return;
 
-        String response = executeWithRetry(() ->
-                client.updateCustomFieldInline(contactId, fieldId, clean)
-        );
-
-        log.info(
-                "INLINE OK contactId={} fieldId={} value={} response={}",
-                contactId,
-                fieldId,
-                clean,
-                response
-        );
+        try {
+            String response = executeWithRetry(() -> client.updateCustomFieldInline(contactId, fieldId, clean));
+            log.info(
+                    "INLINE OK contactId={} fieldId={} value={} response={}",
+                    contactId,
+                    fieldId,
+                    clean,
+                    response
+            );
+        } catch (Exception ex) {
+            log.error(
+                    "INLINE ERROR contactId={} fieldId={} value={}",
+                    contactId,
+                    fieldId,
+                    clean,
+                    ex
+            );
+        }
     }
 
     private String formatFechaUltimaCompra(VerinaTicketRow row) {
-        if (row.fechaUltimaCompra() == null) return null;
+        if (row == null || row.fechaUltimaCompra() == null) return null;
         return row.fechaUltimaCompra().toLocalDate().format(DATE_DD_MM_YYYY);
     }
 

@@ -10,9 +10,17 @@ public class ClientifyConfig {
     private String baseUrl;
     private String token;
 
-    private String webBaseUrl;
-    private String webCookie;
-    private String webCsrfToken;
+    private String inlineBaseUrl;
+    private String inlinePath;
+    private String inlineCookie;
+    private String inlineCsrfToken;
+
+    private String statusClientValue;
+    private long contactSourcePisoId;
+    private long contactSourceDomicilioId;
+
+    private long ownerMartinId;
+    private long ownerDanielaId;
 
     private CustomFields customFields = new CustomFields();
     private Tags tags = new Tags();
@@ -129,28 +137,76 @@ public class ClientifyConfig {
         this.token = token;
     }
 
-    public String getWebBaseUrl() {
-        return webBaseUrl;
+    public String getInlineBaseUrl() {
+        return inlineBaseUrl;
     }
 
-    public void setWebBaseUrl(String webBaseUrl) {
-        this.webBaseUrl = webBaseUrl;
+    public void setInlineBaseUrl(String inlineBaseUrl) {
+        this.inlineBaseUrl = inlineBaseUrl;
     }
 
-    public String getWebCookie() {
-        return webCookie;
+    public String getInlinePath() {
+        return inlinePath;
     }
 
-    public void setWebCookie(String webCookie) {
-        this.webCookie = webCookie;
+    public void setInlinePath(String inlinePath) {
+        this.inlinePath = inlinePath;
     }
 
-    public String getWebCsrfToken() {
-        return webCsrfToken;
+    public String getInlineCookie() {
+        return inlineCookie;
     }
 
-    public void setWebCsrfToken(String webCsrfToken) {
-        this.webCsrfToken = webCsrfToken;
+    public void setInlineCookie(String inlineCookie) {
+        this.inlineCookie = inlineCookie;
+    }
+
+    public String getInlineCsrfToken() {
+        return inlineCsrfToken;
+    }
+
+    public void setInlineCsrfToken(String inlineCsrfToken) {
+        this.inlineCsrfToken = inlineCsrfToken;
+    }
+
+    public String getStatusClientValue() {
+        return statusClientValue;
+    }
+
+    public void setStatusClientValue(String statusClientValue) {
+        this.statusClientValue = statusClientValue;
+    }
+
+    public long getContactSourcePisoId() {
+        return contactSourcePisoId;
+    }
+
+    public void setContactSourcePisoId(long contactSourcePisoId) {
+        this.contactSourcePisoId = contactSourcePisoId;
+    }
+
+    public long getContactSourceDomicilioId() {
+        return contactSourceDomicilioId;
+    }
+
+    public void setContactSourceDomicilioId(long contactSourceDomicilioId) {
+        this.contactSourceDomicilioId = contactSourceDomicilioId;
+    }
+
+    public long getOwnerMartinId() {
+        return ownerMartinId;
+    }
+
+    public void setOwnerMartinId(long ownerMartinId) {
+        this.ownerMartinId = ownerMartinId;
+    }
+
+    public long getOwnerDanielaId() {
+        return ownerDanielaId;
+    }
+
+    public void setOwnerDanielaId(long ownerDanielaId) {
+        this.ownerDanielaId = ownerDanielaId;
     }
 
     public CustomFields getCustomFields() {
