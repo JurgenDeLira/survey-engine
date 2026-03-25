@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -44,12 +45,20 @@ public class ClientifyService {
     }
 
     public boolean upsertContactFromSale(String phoneE164, String ignoredTicketValue, VerinaTicketRow row) {
+        return upsertContactFromSaleDetailed(phoneE164, ignoredTicketValue, row).ok();
+    }
+
+    public UpsertResult upsertContactFromSaleDetailed(String phoneE164, String ignoredTicketValue, VerinaTicketRow row) {
         log.warn("VERSION NUEVA CLIENTIFYSERVICE ACTIVA");
 
         String normalizedPhone = phoneNormalizer.toE164OrNull(phoneE164);
 
-        if (normalizedPhone == null || normalizedPhone.isBlank()) return false;
-        if (row == null) return false;
+        if (normalizedPhone == null || normalizedPhone.isBlank()) {
+            return new UpsertResult(false, null, false, "Telefono inválido/no normalizable");
+        }
+        if (row == null) {
+            return new UpsertResult(false, null, false, "row nulo");
+        }
 
         String safeEmail = sanitizeEmail(row.correoElectronico());
         Long existingContactId = findExistingContactIdByPhone(normalizedPhone);
@@ -72,20 +81,24 @@ public class ClientifyService {
                 log.warn("No se pudo serializar payload de update", e);
             }
 
-            var updated = executeWithRetry(() -> client.updateContact(existingContactId, updatePayload));
+            try {
+                var updated = executeWithRetry(() -> client.updateContact(existingContactId, updatePayload));
 
-            log.info("Clientify PUT response -> contactId={} response={}", existingContactId, updated);
+                log.info("Clientify PUT response -> contactId={} response={}", existingContactId, updated);
 
-            updateOwnerStatusOriginInline(existingContactId, row);
-            updateFieldsInline(existingContactId, row);
-            tryAddTag(existingContactId);
+                if (updated == null || updated.id() == null) {
+                    log.warn("Clientify no devolvió contacto actualizado. contactId={}", existingContactId);
+                    return new UpsertResult(false, existingContactId, false, "PUT sin respuesta válida");
+                }
 
-            if (updated == null || updated.id() == null) {
-                log.warn("Clientify no devolvió contacto actualizado. contactId={}", existingContactId);
-                return false;
+                InlineSyncResult inline = syncInlineForContact(existingContactId, row);
+                tryAddTag(existingContactId);
+
+                return new UpsertResult(true, existingContactId, inline.success(), inline.errorMessage());
+            } catch (Exception ex) {
+                log.error("Error en update de Clientify. contactId={}", existingContactId, ex);
+                return new UpsertResult(false, existingContactId, false, ex.getMessage());
             }
-
-            return true;
         }
 
         var createPayload = new ClientifyClient.CreateContactRequest(
@@ -105,63 +118,109 @@ public class ClientifyService {
             log.warn("No se pudo serializar payload de create", e);
         }
 
-        var created = executeWithRetry(() -> client.createContact(createPayload));
-
-        log.info("Clientify create response -> response={}", created);
-
-        if (created == null || created.id() == null) {
-            log.warn("No se pudo crear contacto en Clientify. phone={}", normalizedPhone);
-            return false;
-        }
-
-        Long contactId = created.id();
-
-        var secondStepUpdate = new ClientifyClient.UpdateContactRequest(
-                cleanName(row.nombre()),
-                cleanLastName(row.apellido()),
-                safeEmail,
-                null,
-                null,
-                null
-        );
-
         try {
-            log.info("Clientify second-step update payload JSON={}", objectMapper.writeValueAsString(secondStepUpdate));
-        } catch (Exception e) {
-            log.warn("No se pudo serializar payload de second-step update", e);
+            var created = executeWithRetry(() -> client.createContact(createPayload));
+
+            log.info("Clientify create response -> response={}", created);
+
+            if (created == null || created.id() == null) {
+                log.warn("No se pudo crear contacto en Clientify. phone={}", normalizedPhone);
+                return new UpsertResult(false, null, false, "POST sin respuesta válida");
+            }
+
+            Long contactId = created.id();
+
+            var secondStepUpdate = new ClientifyClient.UpdateContactRequest(
+                    cleanName(row.nombre()),
+                    cleanLastName(row.apellido()),
+                    safeEmail,
+                    null,
+                    null,
+                    null
+            );
+
+            try {
+                log.info("Clientify second-step update payload JSON={}", objectMapper.writeValueAsString(secondStepUpdate));
+            } catch (Exception e) {
+                log.warn("No se pudo serializar payload de second-step update", e);
+            }
+
+            var updatedAfterCreate = executeWithRetry(() -> client.updateContact(contactId, secondStepUpdate));
+
+            log.info("Clientify second-step PUT response -> contactId={} response={}", contactId, updatedAfterCreate);
+
+            if (updatedAfterCreate == null || updatedAfterCreate.id() == null) {
+                log.warn("Clientify creó contacto pero no devolvió respuesta válida en segundo paso. contactId={}", contactId);
+                return new UpsertResult(false, contactId, false, "Second PUT sin respuesta válida");
+            }
+
+            InlineSyncResult inline = syncInlineForContact(contactId, row);
+            tryAddTag(contactId);
+
+            return new UpsertResult(true, contactId, inline.success(), inline.errorMessage());
+        } catch (Exception ex) {
+            log.error("Error en create de Clientify. phone={}", normalizedPhone, ex);
+            return new UpsertResult(false, null, false, ex.getMessage());
         }
-
-        var updatedAfterCreate = executeWithRetry(() -> client.updateContact(contactId, secondStepUpdate));
-
-        log.info("Clientify second-step PUT response -> contactId={} response={}", contactId, updatedAfterCreate);
-
-        updateOwnerStatusOriginInline(contactId, row);
-        updateFieldsInline(contactId, row);
-        tryAddTag(contactId);
-
-        if (updatedAfterCreate == null || updatedAfterCreate.id() == null) {
-            log.warn("Clientify creó contacto pero no devolvió respuesta válida en segundo paso. contactId={}", contactId);
-            return false;
-        }
-
-        return true;
     }
 
-    private void updateOwnerStatusOriginInline(Long contactId, VerinaTicketRow row) {
-        if (contactId == null || row == null) return;
-
-        updateOwnerInline(contactId, row.propietario());
-        updateStatusInline(contactId);
-        updateOrigenInline(contactId, row.origen());
+    public InlineSyncResult retryInlineSync(Long contactId, VerinaTicketRow row) {
+        if (contactId == null || row == null) {
+            return new InlineSyncResult(false, "contactId o row nulo");
+        }
+        return syncInlineForContact(contactId, row);
     }
 
-    private void updateOwnerInline(Long contactId, String propietario) {
-        if (contactId == null) return;
+    public Long resolveExistingContactIdByPhone(String phoneE164) {
+        String normalizedPhone = phoneNormalizer.toE164OrNull(phoneE164);
+        if (normalizedPhone == null || normalizedPhone.isBlank()) return null;
+        return findExistingContactIdByPhone(normalizedPhone);
+    }
+
+    private InlineSyncResult syncInlineForContact(Long contactId, VerinaTicketRow row) {
+        if (contactId == null || row == null) {
+            return new InlineSyncResult(false, "contactId o row nulo");
+        }
+
+        List<String> errors = new ArrayList<>();
+
+        captureInlineError(errors, updateOwnerInline(contactId, row.propietario()));
+        captureInlineError(errors, updateStatusInline(contactId));
+        captureInlineError(errors, updateOrigenInline(contactId, row.origen()));
+
+        var f = cfg.getCustomFields();
+
+        captureInlineError(errors, updateInline(contactId, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row)));
+        captureInlineError(errors, updateInline(contactId, f.getBateriaAdquiridaId(), row.meBateriaAdquirida()));
+        captureInlineError(errors, updateInline(contactId, f.getSucursalId(), row.me14Sucursal()));
+        captureInlineError(errors, updateInline(contactId, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto())));
+        captureInlineError(errors, updateInline(contactId, f.getModeloAutoId(), row.meModeloAuto()));
+        captureInlineError(errors, updateInline(contactId, f.getMarcaAutoId(), row.meMarcaAuto()));
+        captureInlineError(errors, updateInline(contactId, f.getMarcaBateriaId(), row.meMarcaBateria()));
+        captureInlineError(errors, updateInline(contactId, f.getGamaId(), row.meGama()));
+        captureInlineError(errors, updateInline(contactId, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia())));
+
+        if (errors.isEmpty()) {
+            return new InlineSyncResult(true, null);
+        }
+
+        return new InlineSyncResult(false, String.join(" | ", errors));
+    }
+
+    private void captureInlineError(List<String> errors, InlineActionResult result) {
+        if (result != null && !result.success() && result.message() != null && !result.message().isBlank()) {
+            errors.add(result.message());
+        }
+    }
+
+    private InlineActionResult updateOwnerInline(Long contactId, String propietario) {
+        if (contactId == null) return new InlineActionResult(false, "owner: contactId nulo");
 
         Long ownerId = resolveOwnerId(propietario);
         if (ownerId == null || ownerId <= 0) {
-            log.warn("No se pudo resolver owner para propietario='{}'", propietario);
-            return;
+            String msg = "owner: no se pudo resolver propietario='" + propietario + "'";
+            log.warn(msg);
+            return new InlineActionResult(false, msg);
         }
 
         try {
@@ -175,7 +234,9 @@ public class ClientifyService {
                     ownerId,
                     response
             );
+            return new InlineActionResult(true, null);
         } catch (Exception ex) {
+            String msg = "owner: error propietario='" + propietario + "' ownerId=" + ownerId + " -> " + ex.getMessage();
             log.error(
                     "INLINE OWNER ERROR contactId={} propietario={} ownerId={}",
                     contactId,
@@ -183,6 +244,7 @@ public class ClientifyService {
                     ownerId,
                     ex
             );
+            return new InlineActionResult(false, msg);
         }
     }
 
@@ -205,28 +267,32 @@ public class ClientifyService {
         return null;
     }
 
-    private void updateStatusInline(Long contactId) {
+    private InlineActionResult updateStatusInline(Long contactId) {
         String statusValue = cfg.getStatusClientValue();
-        if (contactId == null) return;
-        if (statusValue == null || statusValue.isBlank()) return;
+        if (contactId == null) return new InlineActionResult(false, "status: contactId nulo");
+        if (statusValue == null || statusValue.isBlank()) return new InlineActionResult(false, "status: valor vacío");
 
         try {
             String response = executeWithRetry(() ->
                     client.updateInlineField(contactId, "status", statusValue.trim())
             );
             log.info("INLINE STATUS OK contactId={} value={} response={}", contactId, statusValue, response);
+            return new InlineActionResult(true, null);
         } catch (Exception ex) {
+            String msg = "status: error value='" + statusValue + "' -> " + ex.getMessage();
             log.error("INLINE STATUS ERROR contactId={} value={}", contactId, statusValue, ex);
+            return new InlineActionResult(false, msg);
         }
     }
 
-    private void updateOrigenInline(Long contactId, String origen) {
-        if (contactId == null) return;
+    private InlineActionResult updateOrigenInline(Long contactId, String origen) {
+        if (contactId == null) return new InlineActionResult(false, "origen: contactId nulo");
 
         Long sourceId = resolveContactSourceId(origen);
         if (sourceId == null || sourceId <= 0) {
-            log.warn("No se pudo resolver contact_source para origen='{}'", origen);
-            return;
+            String msg = "origen: no se pudo resolver origen='" + origen + "'";
+            log.warn(msg);
+            return new InlineActionResult(false, msg);
         }
 
         try {
@@ -240,7 +306,9 @@ public class ClientifyService {
                     sourceId,
                     response
             );
+            return new InlineActionResult(true, null);
         } catch (Exception ex) {
+            String msg = "origen: error origen='" + origen + "' sourceId=" + sourceId + " -> " + ex.getMessage();
             log.error(
                     "INLINE ORIGEN ERROR contactId={} origen={} sourceId={}",
                     contactId,
@@ -248,6 +316,7 @@ public class ClientifyService {
                     sourceId,
                     ex
             );
+            return new InlineActionResult(false, msg);
         }
     }
 
@@ -270,29 +339,13 @@ public class ClientifyService {
         return null;
     }
 
-    private void updateFieldsInline(Long contactId, VerinaTicketRow row) {
-        if (contactId == null || row == null) return;
-
-        var f = cfg.getCustomFields();
-
-        updateInline(contactId, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row));
-        updateInline(contactId, f.getBateriaAdquiridaId(), row.meBateriaAdquirida());
-        updateInline(contactId, f.getSucursalId(), row.me14Sucursal());
-        updateInline(contactId, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto()));
-        updateInline(contactId, f.getModeloAutoId(), row.meModeloAuto());
-        updateInline(contactId, f.getMarcaAutoId(), row.meMarcaAuto());
-        updateInline(contactId, f.getMarcaBateriaId(), row.meMarcaBateria());
-        updateInline(contactId, f.getGamaId(), row.meGama());
-        updateInline(contactId, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia()));
-    }
-
-    private void updateInline(Long contactId, long fieldId, String value) {
-        if (contactId == null) return;
-        if (fieldId <= 0) return;
-        if (value == null) return;
+    private InlineActionResult updateInline(Long contactId, long fieldId, String value) {
+        if (contactId == null) return new InlineActionResult(false, "field " + fieldId + ": contactId nulo");
+        if (fieldId <= 0) return new InlineActionResult(false, "fieldId inválido");
+        if (value == null) return new InlineActionResult(true, null);
 
         String clean = value.trim();
-        if (clean.isBlank() || clean.equals("-")) return;
+        if (clean.isBlank() || clean.equals("-")) return new InlineActionResult(true, null);
 
         try {
             String response = executeWithRetry(() -> client.updateCustomFieldInline(contactId, fieldId, clean));
@@ -303,7 +356,9 @@ public class ClientifyService {
                     clean,
                     response
             );
+            return new InlineActionResult(true, null);
         } catch (Exception ex) {
+            String msg = "field " + fieldId + ": error value='" + clean + "' -> " + ex.getMessage();
             log.error(
                     "INLINE ERROR contactId={} fieldId={} value={}",
                     contactId,
@@ -311,6 +366,7 @@ public class ClientifyService {
                     clean,
                     ex
             );
+            return new InlineActionResult(false, msg);
         }
     }
 
@@ -529,6 +585,23 @@ public class ClientifyService {
             throw new RuntimeException(ex);
         }
     }
+
+    public record UpsertResult(
+            boolean ok,
+            Long contactId,
+            boolean inlineSyncOk,
+            String inlineError
+    ) {}
+
+    public record InlineSyncResult(
+            boolean success,
+            String errorMessage
+    ) {}
+
+    private record InlineActionResult(
+            boolean success,
+            String message
+    ) {}
 
     private record SearchVariants(
             String plus52,

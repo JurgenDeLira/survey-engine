@@ -32,14 +32,25 @@ public class ClientifyClient {
                 .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
                 .build();
 
-        this.inlineWeb = WebClient.builder()
+        WebClient.Builder inlineBuilder = WebClient.builder()
                 .baseUrl(cfg.getInlineBaseUrl())
-                .defaultHeader("Cookie", cfg.getInlineCookie())
-                .defaultHeader("X-CSRFToken", cfg.getInlineCsrfToken())
                 .defaultHeader("X-Requested-With", "XMLHttpRequest")
-                .defaultHeader("Referer", cfg.getInlineBaseUrl() + "/")
-                .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE)
-                .build();
+                .defaultHeader("Accept", MediaType.APPLICATION_JSON_VALUE);
+
+        if (cfg.getInlineCookie() != null && !cfg.getInlineCookie().isBlank()) {
+            inlineBuilder.defaultHeader("Cookie", cfg.getInlineCookie());
+        }
+
+        if (cfg.getInlineCsrfToken() != null && !cfg.getInlineCsrfToken().isBlank()) {
+            inlineBuilder.defaultHeader("X-CSRFToken", cfg.getInlineCsrfToken());
+        }
+
+        if (cfg.getInlineBaseUrl() != null && !cfg.getInlineBaseUrl().isBlank()
+                && cfg.getInlinePath() != null && !cfg.getInlinePath().isBlank()) {
+            inlineBuilder.defaultHeader("Referer", cfg.getInlineBaseUrl() + cfg.getInlinePath());
+        }
+
+        this.inlineWeb = inlineBuilder.build();
     }
 
     public ClientifyContactSearch searchContacts(String search, int pageSize) {
