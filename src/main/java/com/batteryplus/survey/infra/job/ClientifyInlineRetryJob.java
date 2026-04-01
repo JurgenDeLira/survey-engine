@@ -65,32 +65,45 @@ public class ClientifyInlineRetryJob {
                     purchaseEventRepository.markClientifyInlineSyncFailed(
                             row.purchaseId(),
                             null,
-                            "Retry inline: no se encontró contactId"
+                            "Retry inline: no se encontró contactId",
+                            row.createdNewContact()
                     );
                     continue;
                 }
 
                 ClientifyService.InlineSyncResult result =
-                        clientifyService.retryInlineSync(contactId, payload);
+                        clientifyService.retryInlineSync(
+                                contactId,
+                                payload,
+                                Boolean.TRUE.equals(row.createdNewContact())
+                        );
 
                 if (result.success()) {
                     synced++;
-                    purchaseEventRepository.markClientifyInlineSyncSuccess(row.purchaseId(), contactId);
+                    purchaseEventRepository.markClientifyInlineSyncSuccess(
+                            row.purchaseId(),
+                            contactId,
+                            row.createdNewContact()
+                    );
                 } else {
                     failed++;
                     purchaseEventRepository.markClientifyInlineSyncFailed(
                             row.purchaseId(),
                             contactId,
-                            result.errorMessage()
+                            result.errorMessage(),
+                            row.createdNewContact()
                     );
                 }
+
             } catch (Exception ex) {
                 failed++;
                 log.error("Error reprocesando inline. purchaseId={}", row.purchaseId(), ex);
+
                 purchaseEventRepository.markClientifyInlineSyncFailed(
                         row.purchaseId(),
                         row.clientifyContactId(),
-                        ex.getMessage()
+                        ex.getMessage(),
+                        row.createdNewContact()
                 );
             }
         }

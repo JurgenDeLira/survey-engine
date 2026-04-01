@@ -60,12 +60,14 @@ public class PurchaseEventRepository {
                     clientify_inline_synced,
                     clientify_inline_attempts,
                     clientify_inline_last_error,
+                    clientify_created_new_contact,
                     payload_json
                 ) VALUES (?, ?, ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?, ?, ?,
                          ?, ?, ?, ?, ?,
+                         ?,
                          ?,
                          ?,
                          ?,
@@ -102,6 +104,7 @@ public class PurchaseEventRepository {
                     0,
                     0,
                     null,
+                    null,
                     payloadJson
             );
             return true;
@@ -110,30 +113,43 @@ public class PurchaseEventRepository {
         }
     }
 
-    public void markClientifyInlineSyncSuccess(String purchaseId, Long contactId) {
+    public void markClientifyInlineSyncSuccess(
+            String purchaseId,
+            Long contactId,
+            Boolean createdNewContact
+    ) {
         stagingJdbc.update("""
             UPDATE dbo.purchase_events
                SET clientify_contact_id = ?,
                    clientify_inline_synced = 1,
-                   clientify_inline_last_error = NULL
+                   clientify_inline_last_error = NULL,
+                   clientify_created_new_contact = COALESCE(?, clientify_created_new_contact)
              WHERE purchase_id = ?
             """,
                 contactId,
+                createdNewContact,
                 purchaseId
         );
     }
 
-    public void markClientifyInlineSyncFailed(String purchaseId, Long contactId, String error) {
+    public void markClientifyInlineSyncFailed(
+            String purchaseId,
+            Long contactId,
+            String error,
+            Boolean createdNewContact
+    ) {
         stagingJdbc.update("""
             UPDATE dbo.purchase_events
                SET clientify_contact_id = COALESCE(?, clientify_contact_id),
                    clientify_inline_synced = 0,
                    clientify_inline_attempts = ISNULL(clientify_inline_attempts, 0) + 1,
-                   clientify_inline_last_error = ?
+                   clientify_inline_last_error = ?,
+                   clientify_created_new_contact = COALESCE(?, clientify_created_new_contact)
              WHERE purchase_id = ?
             """,
                 contactId,
                 truncate(error, 1000),
+                createdNewContact,
                 purchaseId
         );
     }
@@ -145,7 +161,8 @@ public class PurchaseEventRepository {
                    telefono,
                    payload_json,
                    clientify_contact_id,
-                   ISNULL(clientify_inline_attempts, 0) AS clientify_inline_attempts
+                   ISNULL(clientify_inline_attempts, 0) AS clientify_inline_attempts,
+                   clientify_created_new_contact
               FROM dbo.purchase_events
              WHERE ISNULL(clientify_inline_synced, 0) = 0
                AND ISNULL(clientify_inline_attempts, 0) < 10
@@ -156,7 +173,8 @@ public class PurchaseEventRepository {
                         rs.getString("telefono"),
                         rs.getString("payload_json"),
                         rs.getObject("clientify_contact_id", Long.class),
-                        rs.getInt("clientify_inline_attempts")
+                        rs.getInt("clientify_inline_attempts"),
+                        rs.getObject("clientify_created_new_contact", Boolean.class)
                 ),
                 limit
         );
@@ -172,6 +190,7 @@ public class PurchaseEventRepository {
             String telefono,
             String payloadJson,
             Long clientifyContactId,
-            int attempts
+            int attempts,
+            Boolean createdNewContact
     ) {}
 }

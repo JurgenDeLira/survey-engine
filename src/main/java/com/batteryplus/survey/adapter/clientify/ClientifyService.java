@@ -54,10 +54,11 @@ public class ClientifyService {
         String normalizedPhone = phoneNormalizer.toE164OrNull(phoneE164);
 
         if (normalizedPhone == null || normalizedPhone.isBlank()) {
-            return new UpsertResult(false, null, false, "Telefono inválido/no normalizable");
+            return new UpsertResult(false, null, false, "Telefono inválido/no normalizable", false);
         }
+
         if (row == null) {
-            return new UpsertResult(false, null, false, "row nulo");
+            return new UpsertResult(false, null, false, "row nulo", false);
         }
 
         String safeEmail = sanitizeEmail(row.correoElectronico());
@@ -88,16 +89,16 @@ public class ClientifyService {
 
                 if (updated == null || updated.id() == null) {
                     log.warn("Clientify no devolvió contacto actualizado. contactId={}", existingContactId);
-                    return new UpsertResult(false, existingContactId, false, "PUT sin respuesta válida");
+                    return new UpsertResult(false, existingContactId, false, "PUT sin respuesta válida", false);
                 }
 
-                InlineSyncResult inline = syncInlineForContact(existingContactId, row);
+                InlineSyncResult inline = syncInlineForExistingContact(existingContactId, row);
                 tryAddTag(existingContactId);
 
-                return new UpsertResult(true, existingContactId, inline.success(), inline.errorMessage());
+                return new UpsertResult(true, existingContactId, inline.success(), inline.errorMessage(), false);
             } catch (Exception ex) {
                 log.error("Error en update de Clientify. contactId={}", existingContactId, ex);
-                return new UpsertResult(false, existingContactId, false, ex.getMessage());
+                return new UpsertResult(false, existingContactId, false, ex.getMessage(), false);
             }
         }
 
@@ -125,7 +126,7 @@ public class ClientifyService {
 
             if (created == null || created.id() == null) {
                 log.warn("No se pudo crear contacto en Clientify. phone={}", normalizedPhone);
-                return new UpsertResult(false, null, false, "POST sin respuesta válida");
+                return new UpsertResult(false, null, false, "POST sin respuesta válida", false);
             }
 
             Long contactId = created.id();
@@ -151,24 +152,39 @@ public class ClientifyService {
 
             if (updatedAfterCreate == null || updatedAfterCreate.id() == null) {
                 log.warn("Clientify creó contacto pero no devolvió respuesta válida en segundo paso. contactId={}", contactId);
-                return new UpsertResult(false, contactId, false, "Second PUT sin respuesta válida");
+                return new UpsertResult(false, contactId, false, "Second PUT sin respuesta válida", false);
             }
 
-            InlineSyncResult inline = syncInlineForContact(contactId, row);
+            boolean reallyNewContact = !looksLikePreexistingContact(created);
+
+            InlineSyncResult inline = reallyNewContact
+                    ? syncInlineForNewContact(contactId, row)
+                    : syncInlineForExistingContact(contactId, row);
+
             tryAddTag(contactId);
 
-            return new UpsertResult(true, contactId, inline.success(), inline.errorMessage());
+            return new UpsertResult(
+                    true,
+                    contactId,
+                    inline.success(),
+                    inline.errorMessage(),
+                    reallyNewContact
+            );
+
         } catch (Exception ex) {
             log.error("Error en create de Clientify. phone={}", normalizedPhone, ex);
-            return new UpsertResult(false, null, false, ex.getMessage());
+            return new UpsertResult(false, null, false, ex.getMessage(), false);
         }
     }
 
-    public InlineSyncResult retryInlineSync(Long contactId, VerinaTicketRow row) {
+    public InlineSyncResult retryInlineSync(Long contactId, VerinaTicketRow row, boolean createdByProject) {
         if (contactId == null || row == null) {
             return new InlineSyncResult(false, "contactId o row nulo");
         }
-        return syncInlineForContact(contactId, row);
+
+        return createdByProject
+                ? syncInlineForNewContact(contactId, row)
+                : syncInlineForExistingContact(contactId, row);
     }
 
     public Long resolveExistingContactIdByPhone(String phoneE164) {
@@ -177,7 +193,7 @@ public class ClientifyService {
         return findExistingContactIdByPhone(normalizedPhone);
     }
 
-    private InlineSyncResult syncInlineForContact(Long contactId, VerinaTicketRow row) {
+    private InlineSyncResult syncInlineForNewContact(Long contactId, VerinaTicketRow row) {
         if (contactId == null || row == null) {
             return new InlineSyncResult(false, "contactId o row nulo");
         }
@@ -187,7 +203,34 @@ public class ClientifyService {
         captureInlineError(errors, updateOwnerInline(contactId, row.propietario()));
         captureInlineError(errors, updateStatusInline(contactId));
         captureInlineError(errors, updateOrigenInline(contactId, row.origen()));
+        captureCustomFieldErrors(errors, contactId, row);
 
+        if (errors.isEmpty()) {
+            return new InlineSyncResult(true, null);
+        }
+
+        return new InlineSyncResult(false, String.join(" | ", errors));
+    }
+
+    private InlineSyncResult syncInlineForExistingContact(Long contactId, VerinaTicketRow row) {
+        if (contactId == null || row == null) {
+            return new InlineSyncResult(false, "contactId o row nulo");
+        }
+
+        List<String> errors = new ArrayList<>();
+
+        captureInlineError(errors, updateOwnerInline(contactId, row.propietario()));
+        captureInlineError(errors, updateStatusInline(contactId));
+        captureCustomFieldErrors(errors, contactId, row);
+
+        if (errors.isEmpty()) {
+            return new InlineSyncResult(true, null);
+        }
+
+        return new InlineSyncResult(false, String.join(" | ", errors));
+    }
+
+    private void captureCustomFieldErrors(List<String> errors, Long contactId, VerinaTicketRow row) {
         var f = cfg.getCustomFields();
 
         captureInlineError(errors, updateInline(contactId, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row)));
@@ -199,12 +242,6 @@ public class ClientifyService {
         captureInlineError(errors, updateInline(contactId, f.getMarcaBateriaId(), row.meMarcaBateria()));
         captureInlineError(errors, updateInline(contactId, f.getGamaId(), row.meGama()));
         captureInlineError(errors, updateInline(contactId, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia())));
-
-        if (errors.isEmpty()) {
-            return new InlineSyncResult(true, null);
-        }
-
-        return new InlineSyncResult(false, String.join(" | ", errors));
     }
 
     private void captureInlineError(List<String> errors, InlineActionResult result) {
@@ -368,6 +405,41 @@ public class ClientifyService {
             );
             return new InlineActionResult(false, msg);
         }
+    }
+
+    private boolean looksLikePreexistingContact(ClientifyClient.ClientifyContact contact) {
+        if (contact == null) return false;
+
+        if (contact.contact_source() != null && !contact.contact_source().isBlank()) {
+            return true;
+        }
+
+        if (contact.phones() != null && contact.phones().size() > 1) {
+            return true;
+        }
+
+        if (contact.tags() != null) {
+            String encuesta = encuestaTag().toLowerCase(Locale.ROOT);
+
+            long otherTags = contact.tags().stream()
+                    .filter(tag -> tag != null && !tag.isBlank())
+                    .map(tag -> tag.trim().toLowerCase(Locale.ROOT))
+                    .filter(tag -> !tag.equals(encuesta))
+                    .count();
+
+            if (otherTags > 0) {
+                return true;
+            }
+        }
+
+        if (contact.status() != null && !contact.status().isBlank()) {
+            String status = contact.status().trim().toLowerCase(Locale.ROOT);
+            if (!status.equals("cold-lead")) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private String formatFechaUltimaCompra(VerinaTicketRow row) {
@@ -590,7 +662,8 @@ public class ClientifyService {
             boolean ok,
             Long contactId,
             boolean inlineSyncOk,
-            String inlineError
+            String inlineError,
+            boolean createdNewContact
     ) {}
 
     public record InlineSyncResult(
