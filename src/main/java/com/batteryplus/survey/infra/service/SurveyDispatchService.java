@@ -1,5 +1,6 @@
 package com.batteryplus.survey.infra.service;
 
+import com.batteryplus.survey.adapter.clientify.ClientifyService;
 import com.batteryplus.survey.infra.repository.SurveyDispatchRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,13 +16,16 @@ public class SurveyDispatchService {
 
     private final SurveyDispatchRepository surveyDispatchRepository;
     private final SurveySenderService surveySenderService;
+    private final ClientifyService clientifyService;
 
     public SurveyDispatchService(
             SurveyDispatchRepository surveyDispatchRepository,
-            SurveySenderService surveySenderService
+            SurveySenderService surveySenderService,
+            ClientifyService clientifyService
     ) {
         this.surveyDispatchRepository = surveyDispatchRepository;
         this.surveySenderService = surveySenderService;
+        this.clientifyService = clientifyService;
     }
 
     public int runOnce() {
@@ -44,10 +48,30 @@ public class SurveyDispatchService {
                     boolean marked = surveyDispatchRepository.markDispatched(row.purchaseId());
 
                     if (marked) {
+                        if (row.clientifyContactId() != null) {
+                            boolean tagAdded = clientifyService.addSurveyTagToContact(row.clientifyContactId());
+
+                            if (!tagAdded) {
+                                log.warn(
+                                        "No se pudo agregar tag de encuesta en Clientify. purchaseId={} telefono={} contactId={}",
+                                        row.purchaseId(),
+                                        row.telefono(),
+                                        row.clientifyContactId()
+                                );
+                            }
+                        } else {
+                            log.warn(
+                                    "No hay clientify_contact_id para agregar tag. purchaseId={} telefono={}",
+                                    row.purchaseId(),
+                                    row.telefono()
+                            );
+                        }
+
                         dispatched++;
                         log.info(
                                 "Encuesta marcada como dispatched. purchaseId={} telefono={}",
-                                row.purchaseId(), row.telefono()
+                                row.purchaseId(),
+                                row.telefono()
                         );
                     } else {
                         log.warn(
@@ -61,7 +85,8 @@ public class SurveyDispatchService {
 
                     log.warn(
                             "El sender devolvió false. purchaseId={} telefono={}",
-                            row.purchaseId(), row.telefono()
+                            row.purchaseId(),
+                            row.telefono()
                     );
                 }
 
@@ -71,14 +96,18 @@ public class SurveyDispatchService {
 
                 log.error(
                         "Error en dispatch de encuesta. purchaseId={} telefono={}",
-                        row.purchaseId(), row.telefono(), ex
+                        row.purchaseId(),
+                        row.telefono(),
+                        ex
                 );
             }
         }
 
         log.info(
                 "Dispatch de encuestas finalizado. ready={} dispatched={} failed={}",
-                ready.size(), dispatched, failed
+                ready.size(),
+                dispatched,
+                failed
         );
 
         return dispatched;

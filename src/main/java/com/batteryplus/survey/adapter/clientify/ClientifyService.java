@@ -93,7 +93,6 @@ public class ClientifyService {
                 }
 
                 InlineSyncResult inline = syncInlineForExistingContact(existingContactId, row);
-                tryAddTag(existingContactId);
 
                 return new UpsertResult(true, existingContactId, inline.success(), inline.errorMessage(), false);
             } catch (Exception ex) {
@@ -110,7 +109,7 @@ public class ClientifyService {
                 null,
                 List.of(new ClientifyClient.CreatePhone(PHONE_TYPE_MOBILE, normalizedPhone)),
                 null,
-                List.of(encuestaTag())
+                null
         );
 
         try {
@@ -157,11 +156,16 @@ public class ClientifyService {
 
             boolean reallyNewContact = !looksLikePreexistingContact(created);
 
+            if (!reallyNewContact) {
+                log.info(
+                        "POST devolvió contacto con historial previo. Se tratará como existente. contactId={}",
+                        contactId
+                );
+            }
+
             InlineSyncResult inline = reallyNewContact
                     ? syncInlineForNewContact(contactId, row)
                     : syncInlineForExistingContact(contactId, row);
-
-            tryAddTag(contactId);
 
             return new UpsertResult(
                     true,
@@ -191,6 +195,24 @@ public class ClientifyService {
         String normalizedPhone = phoneNormalizer.toE164OrNull(phoneE164);
         if (normalizedPhone == null || normalizedPhone.isBlank()) return null;
         return findExistingContactIdByPhone(normalizedPhone);
+    }
+
+    public boolean addSurveyTagToContact(Long contactId) {
+        if (contactId == null) {
+            return false;
+        }
+
+        try {
+            var tagResponse = client.addTagToContact(
+                    contactId,
+                    new ClientifyClient.TagRequest(encuestaTag())
+            );
+            log.info("Clientify tag response -> contactId={} response={}", contactId, tagResponse);
+            return true;
+        } catch (Exception ex) {
+            log.warn("Clientify no pudo agregar tag. contactId={} tag={}", contactId, encuestaTag(), ex);
+            return false;
+        }
     }
 
     private InlineSyncResult syncInlineForNewContact(Long contactId, VerinaTicketRow row) {
@@ -439,6 +461,10 @@ public class ClientifyService {
             }
         }
 
+        if (contact.custom_fields() != null && !contact.custom_fields().isEmpty()) {
+            return true;
+        }
+
         return false;
     }
 
@@ -520,21 +546,9 @@ public class ClientifyService {
         return null;
     }
 
-    private void tryAddTag(Long contactId) {
-        try {
-            var tagResponse = client.addTagToContact(
-                    contactId,
-                    new ClientifyClient.TagRequest(encuestaTag())
-            );
-            log.info("Clientify tag response -> contactId={} response={}", contactId, tagResponse);
-        } catch (Exception ex) {
-            log.warn("Clientify no pudo agregar tag. contactId={} tag={}", contactId, encuestaTag(), ex);
-        }
-    }
-
     private String encuestaTag() {
         String tag = cfg.getTags().getEncuestaSatisfaccion();
-        return (tag == null || tag.isBlank()) ? "prueba_jorge" : tag.trim();
+        return (tag == null || tag.isBlank()) ? "encuesta_postventa" : tag.trim();
     }
 
     private String sanitizeEmail(String email) {
