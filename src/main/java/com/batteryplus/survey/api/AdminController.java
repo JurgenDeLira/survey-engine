@@ -1,6 +1,5 @@
 package com.batteryplus.survey.api;
 
-// reintentos/manual run (futuro)
 import com.batteryplus.survey.adapter.clientify.ClientifyService;
 import com.batteryplus.survey.core.model.VerinaTicketRow;
 import com.batteryplus.survey.core.normalize.PhoneNormalizer;
@@ -22,8 +21,10 @@ public class AdminController {
     }
 
     /**
-     * Prueba rápida:
+     * Prueba rápida manual de Clientify.
+     *
      * POST http://localhost:9080/admin/clientify/test
+     *
      * body:
      * {
      *   "phone": "6681507452",
@@ -69,7 +70,7 @@ public class AdminController {
                 null,
                 null,
 
-                "Mexico",
+                "México",
                 "",
                 "",
                 "AdminTest",
@@ -91,6 +92,8 @@ public class AdminController {
         );
     }
 
+
+
     public record TestClientifyRequest(
             String phone,
             String ticket,
@@ -99,5 +102,9 @@ public class AdminController {
             String email
     ) {}
 
-    public record TestClientifyResponse(boolean ok, String phoneE164, String message) {}
+    public record TestClientifyResponse(
+            boolean ok,
+            String phoneE164,
+            String message
+    ) {}
 }

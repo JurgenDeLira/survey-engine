@@ -13,10 +13,6 @@ public class SurveyPreparationJob {
         this.surveyPreparationService = surveyPreparationService;
     }
 
-    /**
-     * Marca ventas como listas para encuesta.
-     * Corre después del pull de Verina.
-     */
     @Scheduled(initialDelay = 70_000, fixedDelay = 300_000)
     public void runPreparation() {
         surveyPreparationService.runOnce();

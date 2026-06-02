@@ -17,10 +17,6 @@ public class VerinaPullJob {
         this.verinaPullService = verinaPullService;
     }
 
-    /**
-     * Ejecuta pull de ventas desde Verina.
-     * Arranca primero al iniciar la app.
-     */
     @Scheduled(initialDelay = 10_000, fixedDelay = 300_000)
     public void runPull() {
         try {

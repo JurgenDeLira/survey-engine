@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @ConditionalOnProperty(prefix = "app.datasource.staging", name = "enabled", havingValue = "true")
 @Repository
@@ -55,12 +56,22 @@ public class PurchaseEventRepository {
                     me_gama, me_marca_auto, me_modelo_auto, me_anio_auto, me_fecha_fin_garantia,
                     pais, estado_provincia, ciudad, origen, estado,
                     survey_status,
+                    clientify_contact_id,
+                    clientify_inline_synced,
+                    clientify_inline_attempts,
+                    clientify_inline_last_error,
+                    clientify_created_new_contact,
                     payload_json
                 ) VALUES (?, ?, ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?, ?,
                          ?, ?, ?, ?, ?,
                          ?, ?, ?, ?, ?,
+                         ?,
+                         ?,
+                         ?,
+                         ?,
+                         ?,
                          ?,
                          ?)
                 """,
@@ -89,6 +100,11 @@ public class PurchaseEventRepository {
                     origen,
                     estado,
                     "pending",
+                    null,
+                    0,
+                    0,
+                    null,
+                    null,
                     payloadJson
             );
             return true;
@@ -96,4 +112,85 @@ public class PurchaseEventRepository {
             return false;
         }
     }
+
+    public void markClientifyInlineSyncSuccess(
+            String purchaseId,
+            Long contactId,
+            Boolean createdNewContact
+    ) {
+        stagingJdbc.update("""
+            UPDATE dbo.purchase_events
+               SET clientify_contact_id = ?,
+                   clientify_inline_synced = 1,
+                   clientify_inline_last_error = NULL,
+                   clientify_created_new_contact = COALESCE(?, clientify_created_new_contact)
+             WHERE purchase_id = ?
+            """,
+                contactId,
+                createdNewContact,
+                purchaseId
+        );
+    }
+
+    public void markClientifyInlineSyncFailed(
+            String purchaseId,
+            Long contactId,
+            String error,
+            Boolean createdNewContact
+    ) {
+        stagingJdbc.update("""
+            UPDATE dbo.purchase_events
+               SET clientify_contact_id = COALESCE(?, clientify_contact_id),
+                   clientify_inline_synced = 0,
+                   clientify_inline_attempts = ISNULL(clientify_inline_attempts, 0) + 1,
+                   clientify_inline_last_error = ?,
+                   clientify_created_new_contact = COALESCE(?, clientify_created_new_contact)
+             WHERE purchase_id = ?
+            """,
+                contactId,
+                truncate(error, 1000),
+                createdNewContact,
+                purchaseId
+        );
+    }
+
+    public List<PendingInlineSyncRow> findPendingInlineSync(int limit) {
+        return stagingJdbc.query("""
+            SELECT TOP (?)
+                   purchase_id,
+                   telefono,
+                   payload_json,
+                   clientify_contact_id,
+                   ISNULL(clientify_inline_attempts, 0) AS clientify_inline_attempts,
+                   clientify_created_new_contact
+              FROM dbo.purchase_events
+             WHERE ISNULL(clientify_inline_synced, 0) = 0
+               AND ISNULL(clientify_inline_attempts, 0) < 10
+             ORDER BY fecha ASC
+            """,
+                (rs, rowNum) -> new PendingInlineSyncRow(
+                        rs.getString("purchase_id"),
+                        rs.getString("telefono"),
+                        rs.getString("payload_json"),
+                        rs.getObject("clientify_contact_id", Long.class),
+                        rs.getInt("clientify_inline_attempts"),
+                        rs.getObject("clientify_created_new_contact", Boolean.class)
+                ),
+                limit
+        );
+    }
+
+    private String truncate(String value, int max) {
+        if (value == null) return null;
+        return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    public record PendingInlineSyncRow(
+            String purchaseId,
+            String telefono,
+            String payloadJson,
+            Long clientifyContactId,
+            int attempts,
+            Boolean createdNewContact
+    ) {}
 }

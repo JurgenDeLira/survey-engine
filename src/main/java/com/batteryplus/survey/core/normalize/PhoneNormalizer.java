@@ -1,37 +1,66 @@
 package com.batteryplus.survey.core.normalize;
 
-//normaliza teléfonos (dedupe)
 import org.springframework.stereotype.Component;
 
 @Component
 public class PhoneNormalizer {
 
+    /**
+     * Formato principal para guardar/enviar a Clientify:
+     * MX -> +52 + 10 dígitos
+     */
     public String toE164OrNull(String raw) {
         if (raw == null) return null;
 
-        String digits = raw.replaceAll("\\D", ""); // solo números
+        String digits = raw.replaceAll("\\D", "");
 
-        // 10 dígitos MX (local)
+        // MX local: 10 dígitos
         if (digits.length() == 10) {
-            return "+521" + digits;
+            return "+52" + digits;
         }
 
-        // 11 dígitos si viene con "1" ya pegado (ej: 1668...)
-        if (digits.length() == 11 && digits.startsWith("1")) {
-            return "+52" + digits; // quedaría +521...
-        }
-
-        // 12 dígitos si viene como 52 + 10
+        // MX con 52 + 10
         if (digits.length() == 12 && digits.startsWith("52")) {
-            // muchos sistemas lo guardan como +521...
-            return "+521" + digits.substring(2);
+            return "+" + digits;
         }
 
-        // ya viene con country?
-        if (digits.length() >= 11 && raw.trim().startsWith("+")) {
+        // MX con 521 + 10  -> normalizar a +52 + 10
+        if (digits.length() == 13 && digits.startsWith("521")) {
+            return "+52" + digits.substring(3);
+        }
+
+        // internacional ya con +
+        if (raw.trim().startsWith("+") && digits.length() >= 11) {
             return "+" + digits;
         }
 
         return null;
+    }
+
+    /**
+     * Formato comparable para detectar equivalencias entre +52 y +521.
+     * Devuelve solo dígitos.
+     */
+    public String comparable(String raw) {
+        if (raw == null) return null;
+
+        String digits = raw.replaceAll("\\D", "");
+
+        // +521XXXXXXXXXX -> 52XXXXXXXXXX
+        if (digits.length() == 13 && digits.startsWith("521")) {
+            return "52" + digits.substring(3);
+        }
+
+        // +52XXXXXXXXXX
+        if (digits.length() == 12 && digits.startsWith("52")) {
+            return digits;
+        }
+
+        // local MX 10 dígitos -> 52 + 10
+        if (digits.length() == 10) {
+            return "52" + digits;
+        }
+
+        return digits;
     }
 }

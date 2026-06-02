@@ -17,10 +17,6 @@ public class SurveyDispatchRepository {
         this.stagingJdbc = stagingJdbc;
     }
 
-    // =========================
-    // ETAPA 1: PREPARACION
-    // =========================
-
     public List<PendingSurveyRow> findPending(int limit) {
         return stagingJdbc.query("""
             SELECT TOP (?)
@@ -54,11 +50,6 @@ public class SurveyDispatchRepository {
         return updated > 0;
     }
 
-
-    // =========================
-    // ETAPA 2: DISPATCH
-    // =========================
-
     public List<ReadySurveyRow> findReadyToDispatch(int limit) {
         return stagingJdbc.query("""
             SELECT TOP (?)
@@ -66,7 +57,8 @@ public class SurveyDispatchRepository {
                 telefono,
                 nombre,
                 propietario,
-                sucursal
+                sucursal,
+                clientify_contact_id
             FROM dbo.purchase_events
             WHERE survey_status = 'ready_for_campaign'
             ORDER BY fecha ASC, created_at ASC
@@ -76,7 +68,8 @@ public class SurveyDispatchRepository {
                         rs.getString("telefono"),
                         rs.getString("nombre"),
                         rs.getString("propietario"),
-                        rs.getString("sucursal")
+                        rs.getString("sucursal"),
+                        rs.getObject("clientify_contact_id", Long.class)
                 ),
                 limit
         );
@@ -106,6 +99,7 @@ public class SurveyDispatchRepository {
             String telefono,
             String nombre,
             String propietario,
-            String sucursal
+            String sucursal,
+            Long clientifyContactId
     ) {}
 }

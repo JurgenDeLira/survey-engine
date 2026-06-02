@@ -104,20 +104,68 @@ public class VerinaPullService {
                 if (phoneE164 == null) {
                     invalidPhone++;
                     log.warn("Venta insertada pero sin teléfono válido. purchaseId={} tel={}", purchaseId, row.telefono());
+
+                    purchaseEventRepository.markClientifyInlineSyncFailed(
+                            purchaseId,
+                            null,
+                            "Telefono inválido/no normalizable",
+                            null
+                    );
                 } else {
                     String ticketValue = "VERINA-" + row.idSucursal() + "-" + row.ticket();
 
                     try {
-                        boolean ok = clientifyService.upsertContactFromSale(
+                        ClientifyService.UpsertResult result = clientifyService.upsertContactFromSaleDetailed(
                                 phoneE164,
                                 ticketValue,
                                 row
                         );
-                        if (!ok) {
-                            log.warn("No se pudo crear/actualizar contacto en Clientify. phone={} purchaseId={}", phoneE164, purchaseId);
+
+                        if (!result.ok()) {
+                            log.warn(
+                                    "No se pudo crear/actualizar contacto en Clientify. phone={} purchaseId={} error={}",
+                                    phoneE164,
+                                    purchaseId,
+                                    result.inlineError()
+                            );
+
+                            purchaseEventRepository.markClientifyInlineSyncFailed(
+                                    purchaseId,
+                                    result.contactId(),
+                                    result.inlineError(),
+                                    result.createdNewContact()
+                            );
+                        } else if (!result.inlineSyncOk()) {
+                            log.warn(
+                                    "Clientify ok pero inline pendiente. phone={} purchaseId={} contactId={} error={}",
+                                    phoneE164,
+                                    purchaseId,
+                                    result.contactId(),
+                                    result.inlineError()
+                            );
+
+                            purchaseEventRepository.markClientifyInlineSyncFailed(
+                                    purchaseId,
+                                    result.contactId(),
+                                    result.inlineError(),
+                                    result.createdNewContact()
+                            );
+                        } else {
+                            purchaseEventRepository.markClientifyInlineSyncSuccess(
+                                    purchaseId,
+                                    result.contactId(),
+                                    result.createdNewContact()
+                            );
                         }
                     } catch (Exception ex) {
                         log.error("Error actualizando Clientify. purchaseId={} phone={}", purchaseId, phoneE164, ex);
+
+                        purchaseEventRepository.markClientifyInlineSyncFailed(
+                                purchaseId,
+                                null,
+                                ex.getMessage(),
+                                null
+                        );
                     }
                 }
             } else {
