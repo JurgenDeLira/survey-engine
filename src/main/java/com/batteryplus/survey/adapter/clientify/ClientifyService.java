@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -130,6 +131,9 @@ public class ClientifyService {
 
             Long contactId = created.id();
 
+            // ── Asignar propietario por sucursal ──────────────────────────────
+            assignOwnerIfResolved(contactId, row);
+
             var secondStepUpdate = new ClientifyClient.UpdateContactRequest(
                     cleanName(row.nombre()),
                     cleanLastName(row.apellido()),
@@ -215,6 +219,67 @@ public class ClientifyService {
         }
     }
 
+    // ── Owner por sucursal ────────────────────────────────────────────────────
+
+    /**
+     * Asigna el propietario al contacto en Clientify según la sucursal de Verina.
+     * CLN- → Martín Sánchez | LM- → Daniela Cota
+     * Si la sucursal no matchea ningún patrón, no se asigna owner (queda el default de Clientify).
+     */
+    private void assignOwnerIfResolved(Long contactId, VerinaTicketRow row) {
+        Long ownerId = resolveOwnerId(row);
+        if (ownerId == null || contactId == null) return;
+
+        try {
+            Map<String, Object> payload = Map.of("owner", ownerId);
+
+            executeWithRetry(() -> client.updateContactDynamic(contactId, payload));
+            log.info("Owner asignado. contactId={} ownerId={}", contactId, ownerId);
+        } catch (Exception ex) {
+            log.warn("No se pudo asignar owner. contactId={} ownerId={}", contactId, ownerId, ex);
+        }
+    }
+
+    /**
+     * Resuelve el owner ID a partir del campo sucursal de VerinaTicketRow.
+     * Formatos conocidos en BD:
+     *   CLN- GUARDIAS CALZADA, CLN- SERVICIO DOMICILIO CALZADA, CLN- SUC. CALZADA, CLN- SUC. LEYVA
+     *   LM- SERVICIO DOMICILIO ROSALES, LM- SUC. BELISARIO, LM- SUC. CAÑAS, LM- SUC. GUASAVE,
+     *   LM- SUC. ROSALES, LM- SUC. VIÑEDOS
+     *   SERVICIO DOMICILIO CALZADA (sin prefijo → se trata como CLN)
+     */
+    private Long resolveOwnerId(VerinaTicketRow row) {
+        if (row == null || row.sucursal() == null) return null;
+
+        String sucursal = row.sucursal().trim().toUpperCase(Locale.ROOT);
+
+        // CLN (Culiacán) → Martín Sánchez
+        if (sucursal.startsWith("CLN")) {
+            long id = cfg.getOwnerMartinId();
+            log.info("Owner resuelto → Martín (CLN). sucursal='{}' ownerId={}", sucursal, id);
+            return id > 0 ? id : null;
+        }
+
+        // LM (Los Mochis) → Daniela Cota
+        if (sucursal.startsWith("LM")) {
+            long id = cfg.getOwnerDanielaId();
+            log.info("Owner resuelto → Daniela (LM). sucursal='{}' ownerId={}", sucursal, id);
+            return id > 0 ? id : null;
+        }
+
+        // "SERVICIO DOMICILIO CALZADA" sin prefijo → CLN (Culiacán)
+        if (sucursal.contains("CALZADA")) {
+            long id = cfg.getOwnerMartinId();
+            log.info("Owner resuelto → Martín (CALZADA sin prefijo). sucursal='{}' ownerId={}", sucursal, id);
+            return id > 0 ? id : null;
+        }
+
+        log.warn("Owner no resuelto para sucursal='{}'. Se usará el default de Clientify.", sucursal);
+        return null;
+    }
+
+    // ── Sync inline ───────────────────────────────────────────────────────────
+
     private InlineSyncResult syncInlineForNewContact(Long contactId, VerinaTicketRow row) {
         if (contactId == null || row == null) {
             return new InlineSyncResult(false, "contactId o row nulo");
@@ -222,7 +287,6 @@ public class ClientifyService {
 
         List<String> errors = new ArrayList<>();
 
-        captureInlineError(errors, updateOwnerInline(contactId, row.propietario()));
         captureInlineError(errors, updateStatusInline(contactId));
         captureInlineError(errors, updateOrigenInline(contactId, row.origen()));
         captureCustomFieldErrors(errors, contactId, row);
@@ -241,7 +305,6 @@ public class ClientifyService {
 
         List<String> errors = new ArrayList<>();
 
-        captureInlineError(errors, updateOwnerInline(contactId, row.propietario()));
         captureInlineError(errors, updateStatusInline(contactId));
         captureCustomFieldErrors(errors, contactId, row);
 
@@ -270,60 +333,6 @@ public class ClientifyService {
         if (result != null && !result.success() && result.message() != null && !result.message().isBlank()) {
             errors.add(result.message());
         }
-    }
-
-    private InlineActionResult updateOwnerInline(Long contactId, String propietario) {
-        if (contactId == null) return new InlineActionResult(false, "owner: contactId nulo");
-
-        Long ownerId = resolveOwnerId(propietario);
-        if (ownerId == null || ownerId <= 0) {
-            String msg = "owner: no se pudo resolver propietario='" + propietario + "'";
-            log.warn(msg);
-            return new InlineActionResult(false, msg);
-        }
-
-        try {
-            String response = executeWithRetry(() ->
-                    client.updateInlineField(contactId, "owner", String.valueOf(ownerId))
-            );
-            log.info(
-                    "INLINE OWNER OK contactId={} propietario={} ownerId={} response={}",
-                    contactId,
-                    propietario,
-                    ownerId,
-                    response
-            );
-            return new InlineActionResult(true, null);
-        } catch (Exception ex) {
-            String msg = "owner: error propietario='" + propietario + "' ownerId=" + ownerId + " -> " + ex.getMessage();
-            log.error(
-                    "INLINE OWNER ERROR contactId={} propietario={} ownerId={}",
-                    contactId,
-                    propietario,
-                    ownerId,
-                    ex
-            );
-            return new InlineActionResult(false, msg);
-        }
-    }
-
-    private Long resolveOwnerId(String propietario) {
-        if (propietario == null) return null;
-
-        String clean = propietario.trim();
-        if (clean.isBlank()) return null;
-
-        if (clean.equalsIgnoreCase("MARTIN S.")) {
-            long id = cfg.getOwnerMartinId();
-            return id > 0 ? id : null;
-        }
-
-        if (clean.equalsIgnoreCase("Daniela Cota")) {
-            long id = cfg.getOwnerDanielaId();
-            return id > 0 ? id : null;
-        }
-
-        return null;
     }
 
     private InlineActionResult updateStatusInline(Long contactId) {
