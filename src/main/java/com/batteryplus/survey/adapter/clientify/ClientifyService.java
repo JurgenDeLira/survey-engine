@@ -93,9 +93,9 @@ public class ClientifyService {
                     return new UpsertResult(false, existingContactId, false, "PUT sin respuesta válida", false);
                 }
 
-                InlineSyncResult inline = syncInlineForExistingContact(existingContactId, row);
+                InlineSyncResult sync = syncFieldsForExistingContact(existingContactId, row);
 
-                return new UpsertResult(true, existingContactId, inline.success(), inline.errorMessage(), false);
+                return new UpsertResult(true, existingContactId, sync.success(), sync.errorMessage(), false);
             } catch (Exception ex) {
                 log.error("Error en update de Clientify. contactId={}", existingContactId, ex);
                 return new UpsertResult(false, existingContactId, false, ex.getMessage(), false);
@@ -167,15 +167,15 @@ public class ClientifyService {
                 );
             }
 
-            InlineSyncResult inline = reallyNewContact
-                    ? syncInlineForNewContact(contactId, row)
-                    : syncInlineForExistingContact(contactId, row);
+            InlineSyncResult sync = reallyNewContact
+                    ? syncFieldsForNewContact(contactId, row)
+                    : syncFieldsForExistingContact(contactId, row);
 
             return new UpsertResult(
                     true,
                     contactId,
-                    inline.success(),
-                    inline.errorMessage(),
+                    sync.success(),
+                    sync.errorMessage(),
                     reallyNewContact
             );
 
@@ -191,8 +191,8 @@ public class ClientifyService {
         }
 
         return createdByProject
-                ? syncInlineForNewContact(contactId, row)
-                : syncInlineForExistingContact(contactId, row);
+                ? syncFieldsForNewContact(contactId, row)
+                : syncFieldsForExistingContact(contactId, row);
     }
 
     public Long resolveExistingContactIdByPhone(String phoneE164) {
@@ -221,18 +221,12 @@ public class ClientifyService {
 
     // ── Owner por sucursal ────────────────────────────────────────────────────
 
-    /**
-     * Asigna el propietario al contacto en Clientify según la sucursal de Verina.
-     * CLN- → Martín Sánchez | LM- → Daniela Cota
-     * Si la sucursal no matchea ningún patrón, no se asigna owner (queda el default de Clientify).
-     */
     private void assignOwnerIfResolved(Long contactId, VerinaTicketRow row) {
         Long ownerId = resolveOwnerId(row);
         if (ownerId == null || contactId == null) return;
 
         try {
             Map<String, Object> payload = Map.of("owner", ownerId);
-
             executeWithRetry(() -> client.updateContactDynamic(contactId, payload));
             log.info("Owner asignado. contactId={} ownerId={}", contactId, ownerId);
         } catch (Exception ex) {
@@ -242,35 +236,51 @@ public class ClientifyService {
 
     /**
      * Resuelve el owner ID a partir del campo sucursal de VerinaTicketRow.
-     * Formatos conocidos en BD:
-     *   CLN- GUARDIAS CALZADA, CLN- SERVICIO DOMICILIO CALZADA, CLN- SUC. CALZADA, CLN- SUC. LEYVA
-     *   LM- SERVICIO DOMICILIO ROSALES, LM- SUC. BELISARIO, LM- SUC. CAÑAS, LM- SUC. GUASAVE,
-     *   LM- SUC. ROSALES, LM- SUC. VIÑEDOS
-     *   SERVICIO DOMICILIO CALZADA (sin prefijo → se trata como CLN)
+     *
+     * Patrones CLN (Culiacán) → Martín Sánchez:
+     *   CLN- GUARDIAS CALZADA, CLN- SERVICIO DOMICILIO CALZADA,
+     *   CLN- SUC. CALZADA, CLN- SUC. LEYVA,
+     *   SERVICIO DOMICILIO CALZADA (sin prefijo), SUC. CALZADA (sin prefijo),
+     *   SUC. LEYVA (sin prefijo), SUC. GUARDIAS (sin prefijo)
+     *
+     * Patrones LM (Los Mochis) → Daniela Cota:
+     *   LM- SERVICIO DOMICILIO ROSALES, LM- SUC. BELISARIO, LM- SUC. CAÑAS,
+     *   LM- SUC. GUASAVE, LM- SUC. ROSALES, LM- SUC. VIÑEDOS,
+     *   SUC. ROSALES (sin prefijo), SUC. GUASAVE (sin prefijo),
+     *   SUC. BELISARIO (sin prefijo), SUC. CAÑAS (sin prefijo),
+     *   SUC. VIÑEDOS (sin prefijo)
      */
     private Long resolveOwnerId(VerinaTicketRow row) {
         if (row == null || row.sucursal() == null) return null;
 
         String sucursal = row.sucursal().trim().toUpperCase(Locale.ROOT);
 
-        // CLN (Culiacán) → Martín Sánchez
+        // CLN (Culiacán) → Martín Sánchez — prefijo explícito
         if (sucursal.startsWith("CLN")) {
             long id = cfg.getOwnerMartinId();
             log.info("Owner resuelto → Martín (CLN). sucursal='{}' ownerId={}", sucursal, id);
             return id > 0 ? id : null;
         }
 
-        // LM (Los Mochis) → Daniela Cota
+        // LM (Los Mochis) → Daniela Cota — prefijo explícito
         if (sucursal.startsWith("LM")) {
             long id = cfg.getOwnerDanielaId();
             log.info("Owner resuelto → Daniela (LM). sucursal='{}' ownerId={}", sucursal, id);
             return id > 0 ? id : null;
         }
 
-        // "SERVICIO DOMICILIO CALZADA" sin prefijo → CLN (Culiacán)
-        if (sucursal.contains("CALZADA")) {
+        // Sin prefijo — sucursales CLN conocidas
+        if (sucursal.contains("CALZADA") || sucursal.contains("LEYVA") || sucursal.contains("GUARDIAS")) {
             long id = cfg.getOwnerMartinId();
-            log.info("Owner resuelto → Martín (CALZADA sin prefijo). sucursal='{}' ownerId={}", sucursal, id);
+            log.info("Owner resuelto → Martín (CLN sin prefijo). sucursal='{}' ownerId={}", sucursal, id);
+            return id > 0 ? id : null;
+        }
+
+        // Sin prefijo — sucursales LM conocidas
+        if (sucursal.contains("ROSALES") || sucursal.contains("GUASAVE") || sucursal.contains("BELISARIO")
+                || sucursal.contains("CAÑAS") || sucursal.contains("VIÑEDOS")) {
+            long id = cfg.getOwnerDanielaId();
+            log.info("Owner resuelto → Daniela (LM sin prefijo). sucursal='{}' ownerId={}", sucursal, id);
             return id > 0 ? id : null;
         }
 
@@ -278,114 +288,93 @@ public class ClientifyService {
         return null;
     }
 
-    // ── Sync inline ───────────────────────────────────────────────────────────
+    // ── Sync via API REST (sin cookies) ──────────────────────────────────────
 
-    private InlineSyncResult syncInlineForNewContact(Long contactId, VerinaTicketRow row) {
+    /**
+     * Sincroniza campos para contacto NUEVO: status, origen y todos los custom fields.
+     */
+    private InlineSyncResult syncFieldsForNewContact(Long contactId, VerinaTicketRow row) {
         if (contactId == null || row == null) {
             return new InlineSyncResult(false, "contactId o row nulo");
         }
 
-        List<String> errors = new ArrayList<>();
+        Long sourceId = resolveContactSourceId(row.origen());
+        List<ClientifyClient.CustomFieldValue> customFields = buildCustomFields(row);
 
-        captureInlineError(errors, updateStatusInline(contactId));
-        captureInlineError(errors, updateOrigenInline(contactId, row.origen()));
-        captureCustomFieldErrors(errors, contactId, row);
+        var patch = new ClientifyClient.PatchContactRequest(
+                cfg.getStatusClientValue(),
+                sourceId,
+                customFields.isEmpty() ? null : customFields
+        );
 
-        if (errors.isEmpty()) {
+        try {
+            log.info("PATCH new contact. contactId={} status={} sourceId={} customFields={}",
+                    contactId, cfg.getStatusClientValue(), sourceId, customFields.size());
+            var result = executeWithRetry(() -> client.patchContact(contactId, patch));
+            log.info("PATCH new contact OK. contactId={} response={}", contactId, result);
             return new InlineSyncResult(true, null);
+        } catch (Exception ex) {
+            String msg = "PATCH new contact error: " + ex.getMessage();
+            log.error("PATCH new contact ERROR. contactId={}", contactId, ex);
+            return new InlineSyncResult(false, msg);
         }
-
-        return new InlineSyncResult(false, String.join(" | ", errors));
     }
 
-    private InlineSyncResult syncInlineForExistingContact(Long contactId, VerinaTicketRow row) {
+    /**
+     * Sincroniza campos para contacto EXISTENTE: status y custom fields (sin tocar origen).
+     */
+    private InlineSyncResult syncFieldsForExistingContact(Long contactId, VerinaTicketRow row) {
         if (contactId == null || row == null) {
             return new InlineSyncResult(false, "contactId o row nulo");
         }
 
-        List<String> errors = new ArrayList<>();
+        List<ClientifyClient.CustomFieldValue> customFields = buildCustomFields(row);
 
-        captureInlineError(errors, updateStatusInline(contactId));
-        captureCustomFieldErrors(errors, contactId, row);
+        var patch = new ClientifyClient.PatchContactRequest(
+                cfg.getStatusClientValue(),
+                null,
+                customFields.isEmpty() ? null : customFields
+        );
 
-        if (errors.isEmpty()) {
+        try {
+            log.info("PATCH existing contact. contactId={} status={} customFields={}",
+                    contactId, cfg.getStatusClientValue(), customFields.size());
+            var result = executeWithRetry(() -> client.patchContact(contactId, patch));
+            log.info("PATCH existing contact OK. contactId={} response={}", contactId, result);
             return new InlineSyncResult(true, null);
+        } catch (Exception ex) {
+            String msg = "PATCH existing contact error: " + ex.getMessage();
+            log.error("PATCH existing contact ERROR. contactId={}", contactId, ex);
+            return new InlineSyncResult(false, msg);
         }
-
-        return new InlineSyncResult(false, String.join(" | ", errors));
     }
 
-    private void captureCustomFieldErrors(List<String> errors, Long contactId, VerinaTicketRow row) {
+    /**
+     * Construye la lista de custom fields a partir del VerinaTicketRow.
+     * Solo incluye campos con valor no nulo/vacío.
+     */
+    private List<ClientifyClient.CustomFieldValue> buildCustomFields(VerinaTicketRow row) {
         var f = cfg.getCustomFields();
+        List<ClientifyClient.CustomFieldValue> fields = new ArrayList<>();
 
-        captureInlineError(errors, updateInline(contactId, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row)));
-        captureInlineError(errors, updateInline(contactId, f.getBateriaAdquiridaId(), row.meBateriaAdquirida()));
-        captureInlineError(errors, updateInline(contactId, f.getSucursalId(), row.me14Sucursal()));
-        captureInlineError(errors, updateInline(contactId, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto())));
-        captureInlineError(errors, updateInline(contactId, f.getModeloAutoId(), row.meModeloAuto()));
-        captureInlineError(errors, updateInline(contactId, f.getMarcaAutoId(), row.meMarcaAuto()));
-        captureInlineError(errors, updateInline(contactId, f.getMarcaBateriaId(), row.meMarcaBateria()));
-        captureInlineError(errors, updateInline(contactId, f.getGamaId(), row.meGama()));
-        captureInlineError(errors, updateInline(contactId, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia())));
+        addFieldIfPresent(fields, f.getFechaUltimaCompraId(), formatFechaUltimaCompra(row));
+        addFieldIfPresent(fields, f.getBateriaAdquiridaId(), row.meBateriaAdquirida());
+        addFieldIfPresent(fields, f.getSucursalId(), row.me14Sucursal());
+        addFieldIfPresent(fields, f.getAnioAutoId(), row.meAnioAuto() == null ? null : String.valueOf(row.meAnioAuto()));
+        addFieldIfPresent(fields, f.getModeloAutoId(), row.meModeloAuto());
+        addFieldIfPresent(fields, f.getMarcaAutoId(), row.meMarcaAuto());
+        addFieldIfPresent(fields, f.getMarcaBateriaId(), row.meMarcaBateria());
+        addFieldIfPresent(fields, f.getGamaId(), row.meGama());
+        addFieldIfPresent(fields, f.getFechaFinGarantiaId(), normalizeFechaGarantia(row.meFechaFinGarantia()));
+
+        return fields;
     }
 
-    private void captureInlineError(List<String> errors, InlineActionResult result) {
-        if (result != null && !result.success() && result.message() != null && !result.message().isBlank()) {
-            errors.add(result.message());
-        }
-    }
-
-    private InlineActionResult updateStatusInline(Long contactId) {
-        String statusValue = cfg.getStatusClientValue();
-        if (contactId == null) return new InlineActionResult(false, "status: contactId nulo");
-        if (statusValue == null || statusValue.isBlank()) return new InlineActionResult(false, "status: valor vacío");
-
-        try {
-            String response = executeWithRetry(() ->
-                    client.updateInlineField(contactId, "status", statusValue.trim())
-            );
-            log.info("INLINE STATUS OK contactId={} value={} response={}", contactId, statusValue, response);
-            return new InlineActionResult(true, null);
-        } catch (Exception ex) {
-            String msg = "status: error value='" + statusValue + "' -> " + ex.getMessage();
-            log.error("INLINE STATUS ERROR contactId={} value={}", contactId, statusValue, ex);
-            return new InlineActionResult(false, msg);
-        }
-    }
-
-    private InlineActionResult updateOrigenInline(Long contactId, String origen) {
-        if (contactId == null) return new InlineActionResult(false, "origen: contactId nulo");
-
-        Long sourceId = resolveContactSourceId(origen);
-        if (sourceId == null || sourceId <= 0) {
-            String msg = "origen: no se pudo resolver origen='" + origen + "'";
-            log.warn(msg);
-            return new InlineActionResult(false, msg);
-        }
-
-        try {
-            String response = executeWithRetry(() ->
-                    client.updateInlineField(contactId, "contact_source", String.valueOf(sourceId))
-            );
-            log.info(
-                    "INLINE ORIGEN OK contactId={} origen={} sourceId={} response={}",
-                    contactId,
-                    origen,
-                    sourceId,
-                    response
-            );
-            return new InlineActionResult(true, null);
-        } catch (Exception ex) {
-            String msg = "origen: error origen='" + origen + "' sourceId=" + sourceId + " -> " + ex.getMessage();
-            log.error(
-                    "INLINE ORIGEN ERROR contactId={} origen={} sourceId={}",
-                    contactId,
-                    origen,
-                    sourceId,
-                    ex
-            );
-            return new InlineActionResult(false, msg);
-        }
+    private void addFieldIfPresent(List<ClientifyClient.CustomFieldValue> fields, long fieldId, String value) {
+        if (fieldId <= 0 || value == null) return;
+        String clean = value.trim();
+        if (clean.isBlank() || clean.equals("-")) return;
+        fields.add(new ClientifyClient.CustomFieldValue(fieldId, clean));
     }
 
     private Long resolveContactSourceId(String origen) {
@@ -405,37 +394,6 @@ public class ClientifyService {
         }
 
         return null;
-    }
-
-    private InlineActionResult updateInline(Long contactId, long fieldId, String value) {
-        if (contactId == null) return new InlineActionResult(false, "field " + fieldId + ": contactId nulo");
-        if (fieldId <= 0) return new InlineActionResult(false, "fieldId inválido");
-        if (value == null) return new InlineActionResult(true, null);
-
-        String clean = value.trim();
-        if (clean.isBlank() || clean.equals("-")) return new InlineActionResult(true, null);
-
-        try {
-            String response = executeWithRetry(() -> client.updateCustomFieldInline(contactId, fieldId, clean));
-            log.info(
-                    "INLINE OK contactId={} fieldId={} value={} response={}",
-                    contactId,
-                    fieldId,
-                    clean,
-                    response
-            );
-            return new InlineActionResult(true, null);
-        } catch (Exception ex) {
-            String msg = "field " + fieldId + ": error value='" + clean + "' -> " + ex.getMessage();
-            log.error(
-                    "INLINE ERROR contactId={} fieldId={} value={}",
-                    contactId,
-                    fieldId,
-                    clean,
-                    ex
-            );
-            return new InlineActionResult(false, msg);
-        }
     }
 
     private boolean looksLikePreexistingContact(ClientifyClient.ClientifyContact contact) {
@@ -692,11 +650,6 @@ public class ClientifyService {
     public record InlineSyncResult(
             boolean success,
             String errorMessage
-    ) {}
-
-    private record InlineActionResult(
-            boolean success,
-            String message
     ) {}
 
     private record SearchVariants(
